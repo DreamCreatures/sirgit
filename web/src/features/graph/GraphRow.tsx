@@ -57,7 +57,7 @@ interface GraphRowProps {
   onMoveBranch?: (branch: string, targetSha: string) => void
 }
 
-const MAX_CHIPS = 3
+const MAX_CHIPS = 4 // [tag][branch][og/twin][branch] fits before the +N chip
 const DRAG_TYPE = 'application/x-sirgit-move'
 /** symmetric svg padding around the node circle — keeps the circle centered
  *  exactly on the lane axis so edges run through its center (the HEAD ring
@@ -95,15 +95,30 @@ function GraphRowInner({
   // plain commits stay smallest
   const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
   const chips = refs ?? []
-  // tags render on their own line below the branches — pushed last in the
-  // old flat list, they always lost their slot to the +N overflow on busy
-  // rows (branch + origin twin + tag = tag invisible)
-  const nonTag = chips.filter((rf) => rf.type !== 'tag')
+  // Chip order: [tags…][branch, its origin twin, branch, …][orphan remotes].
+  // Tags ride their branch to the remote: every chip on a row points at the
+  // SAME commit, so a tag is pushed exactly when the row also carries an
+  // origin/* chip — then only `og/<tag>` is shown (never both forms, unlike
+  // branches which keep local + remote visible).
+  const tagOnRemote = chips.some((rf) => rf.type === 'remote-branch')
   const tags = chips.filter((rf) => rf.type === 'tag')
-  const shown = nonTag.slice(0, MAX_CHIPS)
-  const overflow = nonTag.length - shown.length
-  const shownTags = tags.slice(0, MAX_CHIPS)
-  const tagOverflow = tags.length - shownTags.length
+  const ordered: typeof chips = []
+  const paired = new Set<string>()
+  for (const rf of chips) {
+    if (rf.type !== 'branch') continue
+    ordered.push(rf)
+    paired.add(rf.name)
+    const twin = chips.find((o) => o.type === 'remote-branch' && o.name === `origin/${rf.name}`)
+    if (twin) {
+      ordered.push(twin)
+      paired.add(twin.name)
+    }
+  }
+  for (const rf of chips) {
+    if (rf.type !== 'tag' && !paired.has(rf.name)) ordered.push(rf)
+  }
+  const shown = [...tags, ...ordered].slice(0, MAX_CHIPS)
+  const overflow = tags.length + ordered.length - shown.length
   const [dragOver, setDragOver] = useState(false)
 
   // --- armed-ref action matrix (ungit's model: the subject is already picked,
@@ -204,74 +219,63 @@ function GraphRowInner({
         </svg>
       </div>
 
-      {/* ref chips — clicking a chip selects THAT ref; local branch chips are
-       * draggable. Tags stack on a second line UNDER the branches; the whole
-       * cluster stays vertically centered on the node (flex-col +
-       * justify-center), and rows without tags keep their single-line layout. */}
-      <div className="mr-2 flex shrink-0 flex-col justify-center gap-0.5">
-        <div className="flex items-center gap-1">
-          {shown.map((rf) =>
-            rf.type === 'branch' ? (
-              <Chip
-                key={rf.name}
-                icon={<GitBranch className="h-3 w-3" />}
-                label={rf.name + (isHead && rf.name === currentBranch ? ' (HEAD)' : '')}
-                className={
-                  'bg-emerald-400/10 text-emerald-300 border-emerald-400/30 font-medium' +
-                  (selectedRef?.kind === 'branch' && selectedRef.name === rf.name ? ' ring-1 ring-emerald-400/70' : '')
-                }
-                onSelect={onSelect}
-                sha={row.sha}
-                refKind="branch"
-                refName={rf.name}
-                dragBranch={onMoveBranch ? rf.name : undefined}
-                onCheckout={onCheckout && rf.name !== currentBranch ? () => onCheckout(rf.name) : undefined}
-              />
-            ) : (
-              <Chip
-                key={rf.name}
-                icon={<GitBranch className="h-3 w-3" />}
-                label={rf.name}
-                className={
-                  'bg-sky-400/10 text-sky-300/80 border-sky-400/20' +
-                  (selectedRef?.kind === 'remote-branch' && selectedRef.name === rf.name ? ' ring-1 ring-sky-400/70' : '')
-                }
-                onSelect={onSelect}
-                sha={row.sha}
-                refKind="remote-branch"
-                refName={rf.name}
-              />
-            ),
-          )}
-          {overflow > 0 && (
-            <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
-              +{overflow}
-            </span>
-          )}
-        </div>
-        {shownTags.length > 0 && (
-          <div className="flex items-center gap-1" data-testid="row-tag-chips">
-            {shownTags.map((rf) => (
-              <Chip
-                key={rf.name}
-                icon={<Tag className="h-3 w-3" />}
-                label={rf.name}
-                className={
-                  'bg-amber-400/10 text-amber-300 border-amber-400/30' +
-                  (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
-                }
-                onSelect={onSelect}
-                sha={row.sha}
-                refKind="tag"
-                refName={rf.name}
-              />
-            ))}
-            {tagOverflow > 0 && (
-              <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
-                +{tagOverflow}
-              </span>
-            )}
-          </div>
+      {/* ref chips, one line: [tags][branch + its og/ twin][orphan remotes].
+       * `og/` is a DISPLAY-only abbreviation of origin/ — selection, drags
+       * and git refspecs all keep the full name via refName. A tag whose row
+       * carries a remote chip is on the remote: it renders as og/<tag> only. */}
+      <div className="mr-2 flex shrink-0 items-center gap-1" data-testid="row-chips">
+        {shown.map((rf) =>
+          rf.type === 'tag' ? (
+            <Chip
+              key={rf.name}
+              icon={<Tag className="h-3 w-3" />}
+              label={tagOnRemote ? `og/${rf.name}` : rf.name}
+              title={tagOnRemote ? `${rf.name} is on the remote (same commit as the og/* branch)` : undefined}
+              className={
+                'bg-amber-400/10 text-amber-300 border-amber-400/30' +
+                (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
+              }
+              onSelect={onSelect}
+              sha={row.sha}
+              refKind="tag"
+              refName={rf.name}
+            />
+          ) : rf.type === 'branch' ? (
+            <Chip
+              key={rf.name}
+              icon={<GitBranch className="h-3 w-3" />}
+              label={rf.name + (isHead && rf.name === currentBranch ? ' (HEAD)' : '')}
+              className={
+                'bg-emerald-400/10 text-emerald-300 border-emerald-400/30 font-medium' +
+                (selectedRef?.kind === 'branch' && selectedRef.name === rf.name ? ' ring-1 ring-emerald-400/70' : '')
+              }
+              onSelect={onSelect}
+              sha={row.sha}
+              refKind="branch"
+              refName={rf.name}
+              dragBranch={onMoveBranch ? rf.name : undefined}
+              onCheckout={onCheckout && rf.name !== currentBranch ? () => onCheckout(rf.name) : undefined}
+            />
+          ) : (
+            <Chip
+              key={rf.name}
+              icon={<GitBranch className="h-3 w-3" />}
+              label={rf.name.replace(/^origin\//, 'og/')}
+              className={
+                'bg-sky-400/10 text-sky-300/80 border-sky-400/20' +
+                (selectedRef?.kind === 'remote-branch' && selectedRef.name === rf.name ? ' ring-1 ring-sky-400/70' : '')
+              }
+              onSelect={onSelect}
+              sha={row.sha}
+              refKind="remote-branch"
+              refName={rf.name}
+            />
+          ),
+        )}
+        {overflow > 0 && (
+          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+            +{overflow}
+          </span>
         )}
       </div>
 
@@ -394,6 +398,7 @@ function Chip({
   refName,
   dragBranch,
   onCheckout,
+  title,
 }: {
   icon: ReactNode
   label: string
@@ -402,12 +407,14 @@ function Chip({
   sha: string
   /** this chip's ref identity — clicking selects the ref, not just the commit */
   refKind: 'branch' | 'tag' | 'remote-branch'
-  /** raw ref name (label may carry the (HEAD) display suffix) */
+  /** raw ref name (label may carry the (HEAD) suffix or the og/ abbreviation) */
   refName: string
   /** set → the chip is a local branch and can be dragged onto another row to move it */
   dragBranch?: string
   /** set → double-click checks this branch out (non-current local branches) */
   onCheckout?: () => void
+  /** optional hover tooltip */
+  title?: string
 }) {
   return (
     <button
@@ -421,7 +428,7 @@ function Chip({
       className={`inline-flex max-w-44 items-center gap-1 truncate rounded-md border px-1.5 py-0.5 text-[11px] hover:brightness-125 ${
         dragBranch ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${className}`}
-      title={onCheckout ? `${label} — double-click to check out` : label}
+      title={title ?? (onCheckout ? `${label} — double-click to check out` : label)}
       onClick={(e) => {
         e.stopPropagation()
         onSelect(sha, { kind: refKind, name: refName })
