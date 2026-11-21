@@ -785,6 +785,7 @@ mod tests {
 
         let (title, body) = squash(tmp.to_str().unwrap(), "main", &c1).await.unwrap().unwrap();
         assert_eq!(title, "c2");
+        assert!(body.is_empty(), "c2 has no commit body: {body:?}");
         assert_eq!(
             String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout).trim(),
             c1,
