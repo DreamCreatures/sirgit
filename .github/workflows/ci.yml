@@ -23,6 +23,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      - name: web install
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: web build (rust-embed needs web/dist to EXIST at compile time)
+        run: pnpm --dir web build
+
       - name: cargo test (gitx parsers, ops, delta on fixture repos)
         run: |
           set -o pipefail
@@ -32,12 +38,6 @@ jobs:
             echo "::error::$(grep -m4 -E '^error|panicked at|test result: FAILED' /tmp/cargo-test.log | tr '\n' '|' | head -c 600)"
             exit 1
           }
-
-      - name: web install
-        run: pnpm --dir web install --frozen-lockfile
-
-      - name: web build (tsc + vite; e2e serves this dist)
-        run: pnpm --dir web build
 
       - name: vitest (ordering + lane algorithms)
         run: pnpm --dir web test
