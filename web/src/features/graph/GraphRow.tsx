@@ -95,8 +95,15 @@ function GraphRowInner({
   // plain commits stay smallest
   const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
   const chips = refs ?? []
-  const shown = chips.slice(0, MAX_CHIPS)
-  const overflow = chips.length - shown.length
+  // tags render on their own line below the branches — pushed last in the
+  // old flat list, they always lost their slot to the +N overflow on busy
+  // rows (branch + origin twin + tag = tag invisible)
+  const nonTag = chips.filter((rf) => rf.type !== 'tag')
+  const tags = chips.filter((rf) => rf.type === 'tag')
+  const shown = nonTag.slice(0, MAX_CHIPS)
+  const overflow = nonTag.length - shown.length
+  const shownTags = tags.slice(0, MAX_CHIPS)
+  const tagOverflow = tags.length - shownTags.length
   const [dragOver, setDragOver] = useState(false)
 
   // --- armed-ref action matrix (ungit's model: the subject is already picked,
@@ -197,59 +204,74 @@ function GraphRowInner({
         </svg>
       </div>
 
-      {/* ref chips — clicking a chip selects THAT ref; local branch chips are draggable */}
-      <div className="mr-2 flex shrink-0 items-center gap-1">
-        {shown.map((rf) =>
-          rf.type === 'tag' ? (
-            <Chip
-              key={rf.name}
-              icon={<Tag className="h-3 w-3" />}
-              label={rf.name}
-              className={
-                'bg-amber-400/10 text-amber-300 border-amber-400/30' +
-                (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
-              }
-              onSelect={onSelect}
-              sha={row.sha}
-              refKind="tag"
-              refName={rf.name}
-            />
-          ) : rf.type === 'branch' ? (
-            <Chip
-              key={rf.name}
-              icon={<GitBranch className="h-3 w-3" />}
-              label={rf.name + (isHead && rf.name === currentBranch ? ' (HEAD)' : '')}
-              className={
-                'bg-emerald-400/10 text-emerald-300 border-emerald-400/30 font-medium' +
-                (selectedRef?.kind === 'branch' && selectedRef.name === rf.name ? ' ring-1 ring-emerald-400/70' : '')
-              }
-              onSelect={onSelect}
-              sha={row.sha}
-              refKind="branch"
-              refName={rf.name}
-              dragBranch={onMoveBranch ? rf.name : undefined}
-              onCheckout={onCheckout && rf.name !== currentBranch ? () => onCheckout(rf.name) : undefined}
-            />
-          ) : (
-            <Chip
-              key={rf.name}
-              icon={<GitBranch className="h-3 w-3" />}
-              label={rf.name}
-              className={
-                'bg-sky-400/10 text-sky-300/80 border-sky-400/20' +
-                (selectedRef?.kind === 'remote-branch' && selectedRef.name === rf.name ? ' ring-1 ring-sky-400/70' : '')
-              }
-              onSelect={onSelect}
-              sha={row.sha}
-              refKind="remote-branch"
-              refName={rf.name}
-            />
-          ),
-        )}
-        {overflow > 0 && (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
-            +{overflow}
-          </span>
+      {/* ref chips — clicking a chip selects THAT ref; local branch chips are
+       * draggable. Tags stack on a second line UNDER the branches; the whole
+       * cluster stays vertically centered on the node (flex-col +
+       * justify-center), and rows without tags keep their single-line layout. */}
+      <div className="mr-2 flex shrink-0 flex-col justify-center gap-0.5">
+        <div className="flex items-center gap-1">
+          {shown.map((rf) =>
+            rf.type === 'branch' ? (
+              <Chip
+                key={rf.name}
+                icon={<GitBranch className="h-3 w-3" />}
+                label={rf.name + (isHead && rf.name === currentBranch ? ' (HEAD)' : '')}
+                className={
+                  'bg-emerald-400/10 text-emerald-300 border-emerald-400/30 font-medium' +
+                  (selectedRef?.kind === 'branch' && selectedRef.name === rf.name ? ' ring-1 ring-emerald-400/70' : '')
+                }
+                onSelect={onSelect}
+                sha={row.sha}
+                refKind="branch"
+                refName={rf.name}
+                dragBranch={onMoveBranch ? rf.name : undefined}
+                onCheckout={onCheckout && rf.name !== currentBranch ? () => onCheckout(rf.name) : undefined}
+              />
+            ) : (
+              <Chip
+                key={rf.name}
+                icon={<GitBranch className="h-3 w-3" />}
+                label={rf.name}
+                className={
+                  'bg-sky-400/10 text-sky-300/80 border-sky-400/20' +
+                  (selectedRef?.kind === 'remote-branch' && selectedRef.name === rf.name ? ' ring-1 ring-sky-400/70' : '')
+                }
+                onSelect={onSelect}
+                sha={row.sha}
+                refKind="remote-branch"
+                refName={rf.name}
+              />
+            ),
+          )}
+          {overflow > 0 && (
+            <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+              +{overflow}
+            </span>
+          )}
+        </div>
+        {shownTags.length > 0 && (
+          <div className="flex items-center gap-1" data-testid="row-tag-chips">
+            {shownTags.map((rf) => (
+              <Chip
+                key={rf.name}
+                icon={<Tag className="h-3 w-3" />}
+                label={rf.name}
+                className={
+                  'bg-amber-400/10 text-amber-300 border-amber-400/30' +
+                  (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
+                }
+                onSelect={onSelect}
+                sha={row.sha}
+                refKind="tag"
+                refName={rf.name}
+              />
+            ))}
+            {tagOverflow > 0 && (
+              <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                +{tagOverflow}
+              </span>
+            )}
+          </div>
         )}
       </div>
 

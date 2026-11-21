@@ -46,7 +46,8 @@ jobs:
         with:
           workspaces: server
 
-      - uses: pnpm/action-setup@v4.2.0
+      - name: enable pnpm via corepack (action-setup still targets Node 20)
+        run: corepack enable && corepack prepare pnpm@12.9.1 --activate
       - uses: actions/setup-node@v5
         with:
           node-version: 22
