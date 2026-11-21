@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - uses: pnpm/action-setup@v4 # reads packageManager from package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: cargo test (gitx parsers, ops, delta on fixture repos)
+        run: cargo test --manifest-path server/Cargo.toml
+
+      - name: web install
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: web build (tsc + vite; e2e serves this dist)
+        run: pnpm --dir web build
+
+      - name: vitest (ordering + lane algorithms)
+        run: pnpm --dir web test
+
+      - name: playwright e2e (open → graph → stage → commit)
+        run: |
+          pnpm --dir web exec playwright install --with-deps chromium
+          pnpm --dir web exec playwright test

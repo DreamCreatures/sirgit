@@ -105,6 +105,16 @@ pnpm --dir web exec playwright test            # Playwright smoke: open → grap
 
 E2E starts its own server on :8549 automatically (`reuseExistingServer` honored; set `SIRGIT_URL` to target a running one).
 
+### Release
+
+Bump `version` in **both** `server/Cargo.toml` and `package.json` (prepare-bin warns on mismatch), commit, then:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The `release` workflow builds the release binary (web/dist embedded), runs the full suite, publishes to npm, and attaches the binary + tarball to a GitHub Release. One-time setup: add the `NPM_TOKEN` repo secret (an npm *Automation* token, which skips 2FA in CI).
+
 ### Performance numbers (M1 acceptance)
 
 Benchmarked head-to-head against ungit on **ungit's own repository** — see **[`docs/performance.md`](docs/performance.md)**: 10× faster first paint, ~420× less data transferred to scroll the same history, constant 25-row DOM, 0 long tasks. Also measured on the 50k-commit fixture (`node scripts/make-big-repo.mjs /tmp/sirgit-big 50000`):

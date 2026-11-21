@@ -1,0 +1,52 @@
+# Ships a tag: builds the release binary (with web/dist embedded — release
+# rust-embed bakes it in at compile time, so the web build MUST come first),
+# runs the full test suite, publishes the npm package, and attaches the
+# binary + tarball to a GitHub Release.
+#
+# Prereq: repo secret NPM_TOKEN (npm "Automation" token — bypasses 2FA in CI).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: macos-latest # arm64 — matches the package's os/cpu guards
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web build # embedded into the binary by the step below
+      - run: cargo test --manifest-path server/Cargo.toml
+
+      - name: pack (prepack → cargo build --release → bin/sirgit)
+        run: pnpm pack
+
+      - name: npm publish
+        run: npm publish --access public ./$(ls sirgit-*.tgz)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: GitHub Release (binary + npm tarball)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bin/sirgit
+            sirgit-*.tgz
+          generate_release_notes: true

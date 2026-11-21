@@ -112,9 +112,17 @@ mod tests {
 
     #[test]
     fn start_url_defaults_to_cwd() {
-        // /tmp is a symlink on macOS — canonicalize resolves it
+        // compute the expectation the way the OS does — /tmp → /private/tmp on
+        // macOS, plain /tmp on Linux (CI)
+        let canon = std::fs::canonicalize("/tmp").unwrap();
         let url = start_url_with(&addr(), None, || std::path::PathBuf::from("/tmp"));
-        assert_eq!(url, "http://127.0.0.1:8449/#/repository?path=/private/tmp");
+        assert_eq!(
+            url,
+            format!(
+                "http://127.0.0.1:8449/#/repository?path={}",
+                urlencode(&canon.to_string_lossy())
+            )
+        );
     }
 
     #[test]
