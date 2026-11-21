@@ -107,15 +107,13 @@ E2E starts its own server on :8549 automatically (`reuseExistingServer` honored;
 
 ### Release
 
-**Automatic (preferred):** write [conventional commits](https://www.conventionalcommits.org) — `feat:` bumps minor, `fix:` bumps patch, `BREAKING CHANGE` / `!` bumps major. On every push to `main`, release-please maintains a `chore(main): release X.Y.Z` PR (version bump in `package.json` + generated `CHANGELOG.md`). **Merge that PR and everything ships**: tag, release build, tests, npm publish, GitHub Release with the binary attached. `package.json` is the single version source — `scripts/prepare-bin.mjs` syncs `server/Cargo.toml` (the binary's `--version`) to it at build time.
-
-**Manual (still works):** bump `version` in `package.json`, then:
+Bump `version` in `package.json` (the single source — `scripts/prepare-bin.mjs` syncs `server/Cargo.toml` to it at build time), commit, then:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-Either path runs the same `release` workflow (macOS arm64): web build → cargo test → `pnpm pack` → `npm publish` → GitHub Release with `bin/sirgit` + the tarball. One-time setup: the `NPM_TOKEN` repo secret (an npm *Automation* token, which skips 2FA in CI).
+The `release` workflow (macOS arm64) does the rest: web build → cargo test → `pnpm pack` → `npm publish` → GitHub Release with `bin/sirgit` + the tarball attached. One-time setup: the `NPM_TOKEN` repo secret (an npm *Automation* token, which skips 2FA in CI). *(A release-please bot flow was tried and removed — this org's policy forbids workflow-created PRs.)*
 
 ### Performance numbers (M1 acceptance)
 

@@ -8,26 +8,20 @@ name: release
 
 on:
   push:
-    tags: ['v*'] # manual path: git tag vX.Y.Z && git push origin vX.Y.Z
-    branches: [main] # auto path: merging the release-please PR lands
-    # "chore(main): release X.Y.Z" on main — a real user push, so this
-    # workflow fires (GITHUB_TOKEN-made tags couldn't trigger it)
+    tags: ['v*'] # the ship trigger: git tag vX.Y.Z && git push origin vX.Y.Z
 
 jobs:
   release:
     runs-on: macos-latest # arm64 — matches the package's os/cpu guards
     permissions:
       contents: write # create the GitHub Release
-    if: >
-      startsWith(github.ref, 'refs/tags/v') ||
-      (github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(main): release'))
     steps:
       - uses: actions/checkout@v4
 
-      - name: resolve version (tag ref, or package.json on release merges)
+      - name: resolve version from the tag
         id: v
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then V="${GITHUB_REF_NAME#v}"; else V=$(jq -r .version package.json); fi
+          V="${GITHUB_REF_NAME#v}"
           echo "version=$V" >> "$GITHUB_OUTPUT"
           test -n "$V"
 
