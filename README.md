@@ -34,7 +34,7 @@ A fast, lightweight local git graph UI — ungit's proven concepts on a modern s
 One Rust binary, distributed through npm so `pnpm install -g` works (macOS arm64 today; the package refuses politely elsewhere):
 
 ```bash
-pnpm install -g sirgit        # from npm (once published)
+pnpm install -g dcs-sirgit    # from npm
 pnpm install -g .             # or from a checkout — builds the release binary and links it
 
 sirgit                        # inside a project: opens that repo

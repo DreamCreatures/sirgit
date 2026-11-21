@@ -39,7 +39,7 @@ jobs:
         run: pnpm pack
 
       - name: npm publish
-        run: npm publish --access public ./$(ls sirgit-*.tgz)
+        run: npm publish --access public ./*.tgz
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -48,5 +48,5 @@ jobs:
         with:
           files: |
             bin/sirgit
-            sirgit-*.tgz
+            *.tgz
           generate_release_notes: true
