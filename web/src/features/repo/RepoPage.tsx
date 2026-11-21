@@ -491,6 +491,7 @@ export default function RepoPage() {
           <div className="relative min-h-0 flex-1">
             <GraphView
               refBySha={refBySha}
+          remoteTags={refs?.remoteTags ?? []}
               headSha={refs?.head?.sha ?? null}
               nextCommit={nextCommit}
               ghostTarget={ghostPreview}

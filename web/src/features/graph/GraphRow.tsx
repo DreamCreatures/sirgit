@@ -33,6 +33,8 @@ interface GraphRowProps {
   row: CommitRow
   lane: number
   refs?: RefInfo[]
+  /** tag names known to be on the remote — pushed tags render as og/<tag> */
+  remoteTags?: string[]
   isHead: boolean
   /** the checked-out branch — the only chip allowed to say (HEAD) */
   currentBranch?: string
@@ -78,6 +80,7 @@ function GraphRowInner({
   row,
   lane,
   refs,
+  remoteTags,
   isHead,
   currentBranch,
   selected,
@@ -96,11 +99,15 @@ function GraphRowInner({
   const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
   const chips = refs ?? []
   // Chip order: [tags…][branch, its origin twin, branch, …][orphan remotes].
-  // Tags ride their branch to the remote: every chip on a row points at the
-  // SAME commit, so a tag is pushed exactly when the row also carries an
-  // origin/* chip — then only `og/<tag>` is shown (never both forms, unlike
-  // branches which keep local + remote visible).
-  const tagOnRemote = chips.some((rf) => rf.type === 'remote-branch')
+  // Pushed-tag truth: the server's ls-remote cache (refreshed after every
+  // fetch/push/pull) when it has data; before any network op ran through
+  // sirgit, fall back to the row heuristic — every chip on a row points at
+  // the SAME commit, so a tag riding a row that carries an origin/* chip is
+  // on the remote. Either way only `og/<tag>` is shown (never both forms,
+  // unlike branches which keep local + remote visible).
+  const knownRemoteTags = remoteTags != null && remoteTags.length > 0
+  const rowHasRemote = chips.some((rf) => rf.type === 'remote-branch')
+  const tagPushed = (name: string) => (knownRemoteTags ? remoteTags!.includes(name) : rowHasRemote)
   const tags = chips.filter((rf) => rf.type === 'tag')
   const ordered: typeof chips = []
   const paired = new Set<string>()
@@ -187,7 +194,8 @@ function GraphRowInner({
       onDrop={onDrop}
       onDragLeave={() => setDragOver(false)}
     >
-      {/* lane node — outlined circle in the lane color; solid when selected.
+      {/* lane node — outlined circle in the lane color; solid when selected;
+       *  picking the node ITSELF (vs a ref chip) also grows it 20%.
        *  Same padding on every side keeps the circle centered on (laneX,
        *  ROW_H/2), the point the edge layer draws its lines through. */}
       <div
@@ -200,7 +208,12 @@ function GraphRowInner({
         title={`Select commit ${row.sha.slice(0, 7)}`}
         data-testid="graph-node"
       >
-        <svg width={2 * (r + NODE_PAD)} height={2 * (r + NODE_PAD)}>
+        <svg
+          width={2 * (r + NODE_PAD)}
+          height={2 * (r + NODE_PAD)}
+          className="transition-transform duration-150 ease-out"
+          style={{ transform: selected && !selectedRef ? 'scale(1.2)' : 'scale(1)' }}
+        >
           {/* backing plate: covers the edge layer in the stroke/ring band so
            *  curves visually terminate at the node boundary instead of
            *  X-crossing the HEAD ring (they still run to the center, hidden) */}
@@ -212,6 +225,7 @@ function GraphRowInner({
             cx={r + NODE_PAD}
             cy={r + NODE_PAD}
             r={r}
+            className="transition-[fill] duration-150"
             fill={selected ? color : '#18181b'}
             stroke={color}
             strokeWidth={isHead ? 2.5 : 2}
@@ -221,16 +235,16 @@ function GraphRowInner({
 
       {/* ref chips, one line: [tags][branch + its og/ twin][orphan remotes].
        * `og/` is a DISPLAY-only abbreviation of origin/ — selection, drags
-       * and git refspecs all keep the full name via refName. A tag whose row
-       * carries a remote chip is on the remote: it renders as og/<tag> only. */}
+       * and git refspecs all keep the full name via refName. A pushed tag
+       * renders as og/<tag> only. */}
       <div className="mr-2 flex shrink-0 items-center gap-1" data-testid="row-chips">
         {shown.map((rf) =>
           rf.type === 'tag' ? (
             <Chip
               key={rf.name}
               icon={<Tag className="h-3 w-3" />}
-              label={tagOnRemote ? `og/${rf.name}` : rf.name}
-              title={tagOnRemote ? `${rf.name} is on the remote (same commit as the og/* branch)` : undefined}
+              label={tagPushed(rf.name) ? `og/${rf.name}` : rf.name}
+              title={tagPushed(rf.name) ? `${rf.name} is on the remote` : undefined}
               className={
                 'bg-amber-400/10 text-amber-300 border-amber-400/30' +
                 (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
