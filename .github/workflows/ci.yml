@@ -42,6 +42,9 @@ jobs:
       - name: vitest (ordering + lane algorithms)
         run: pnpm --dir web test
 
+      - name: build server binary (e2e boots it via cargo run — prebuild so the 60s webServer timeout holds)
+        run: cargo build --manifest-path server/Cargo.toml
+
       - name: playwright e2e (open → graph → stage → commit)
         run: |
           pnpm --dir web exec playwright install --with-deps chromium
