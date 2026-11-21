@@ -48,4 +48,8 @@ jobs:
       - name: playwright e2e (open → graph → stage → commit)
         run: |
           pnpm --dir web exec playwright install --with-deps chromium
-          pnpm --dir web exec playwright test
+          set -o pipefail
+          pnpm --dir web exec playwright test 2>&1 | tee /tmp/e2e.log || {
+            echo "::error::$(grep -m4 -E 'Error:|Timed out|✘|failed' /tmp/e2e.log | tr '\n' '|' | head -c 600)"
+            exit 1
+          }
