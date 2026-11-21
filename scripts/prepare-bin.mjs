@@ -25,9 +25,16 @@ fs.copyFileSync(path.join(root, 'server/target/release/sirgit'), dest)
 fs.chmodSync(dest, 0o755)
 
 const mb = (fs.statSync(dest).size / 1e6).toFixed(1)
-const cargoVersion = fs
-  .readFileSync(path.join(root, 'server/Cargo.toml'), 'utf8')
-  .match(/^version = "(.+)"/m)?.[1]
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
-const mismatch = cargoVersion !== pkgVersion ? '  ⚠ cargo/npm version mismatch — bump both' : ''
-console.log(`staged bin/sirgit (${mb} MB) — cargo v${cargoVersion}, npm v${pkgVersion}${mismatch}`)
+const cargoToml = path.join(root, 'server/Cargo.toml')
+const cargoVersion = fs.readFileSync(cargoToml, 'utf8').match(/^version = "(.+)"/m)?.[1]
+if (cargoVersion !== pkgVersion) {
+  // package.json is the single version source (release-please bumps it);
+  // sync the binary's --version to match before the release build
+  fs.writeFileSync(
+    cargoToml,
+    fs.readFileSync(cargoToml, 'utf8').replace(/^version = ".*"/m, `version = "${pkgVersion}"`),
+  )
+  console.log(`synced server/Cargo.toml version ${cargoVersion} -> ${pkgVersion}`)
+}
+console.log(`staged bin/sirgit (${mb} MB) — version ${pkgVersion}`)
