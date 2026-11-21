@@ -11,9 +11,7 @@ path = "src/main.rs"
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
 notify = "8"
 rust-embed = "8"
 serde = { version = "1", features = ["derive"] }
@@ -23,7 +21,6 @@ thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-futures = "0.3"
 open = "5"
 dirs = "6"
 mime_guess = "2"
