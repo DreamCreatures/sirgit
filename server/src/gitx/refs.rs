@@ -49,7 +49,10 @@ pub struct RefsSnapshot {
     pub behind: i64,
 }
 
-const REF_FORMAT: &str = "%(objectname)%1f%(refname)%1f%(upstream:short)%1e";
+// %(*objectname) is the PEELED sha — the commit an annotated tag points at.
+// Plain %(objectname) reports the tag object itself, whose sha matches no
+// graph row, so annotated-tag chips never landed on any commit.
+const REF_FORMAT: &str = "%(objectname)%1f%(refname)%1f%(upstream:short)%1f%(*objectname)%1e";
 
 /// Full ref snapshot: local branches, remote branches, tags, remotes, HEAD.
 pub async fn read_refs(path: &str) -> Result<RefsSnapshot, super::errors::GitError> {
@@ -75,14 +78,17 @@ pub async fn read_refs(path: &str) -> Result<RefsSnapshot, super::errors::GitErr
             continue;
         }
         let mut f = record.split('\x1f');
-        let (Some(sha), Some(refname), upstream) = (f.next(), f.next(), f.next()) else { continue };
+        let (Some(sha), Some(refname), upstream, peeled) = (f.next(), f.next(), f.next(), f.next()) else { continue };
         let sha = sha.trim().to_string();
         let refname = refname.trim();
         let upstream = upstream.unwrap_or("").trim();
         let upstream = if upstream.is_empty() { None } else { Some(upstream.to_string()) };
+        let peeled = peeled.unwrap_or("").trim();
         if let Some(name) = refname.strip_prefix("refs/heads/") {
             branches.push(RefInfo { name: name.to_string(), sha, kind: RefKind::Branch, upstream });
         } else if let Some(name) = refname.strip_prefix("refs/tags/") {
+            // annotated tag → use the commit it dereferences to
+            let sha = if peeled.is_empty() { sha } else { peeled.to_string() };
             tags.push(RefInfo { name: name.to_string(), sha, kind: RefKind::Tag, upstream: None });
         } else if let Some(name) = refname.strip_prefix("refs/remotes/") {
             // skip the "origin/HEAD -> origin/main" style entries (no sha match issue; they carry "^{}" in newer git? they appear as remote branch named origin/HEAD)
@@ -240,5 +246,27 @@ mod tests {
         assert!(snap.remotes.is_empty());
         assert_eq!(snap.head.branch.as_deref(), Some("main"));
         assert!(!snap.head.detached);
+    }
+
+    #[tokio::test]
+    async fn annotated_tags_peel_to_their_commit() {
+        let (td,) = fixture();
+        // v2.0 is ANNOTATED: refs/tags/v2.0 points at a tag OBJECT whose sha
+        // matches no graph row — read_refs must report the peeled commit
+        let p = &td.path;
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(p)
+                .env("GIT_AUTHOR_NAME", "T").env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T").env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        assert!(git(&["tag", "-a", "v2.0", "-m", "release"]).status.success());
+        let head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout).trim().to_string();
+        let snap = read_refs(td.path.to_str().unwrap()).await.unwrap();
+        let v2 = snap.tags.iter().find(|t| t.name == "v2.0").expect("annotated tag listed");
+        assert_eq!(v2.sha, head, "annotated tag must peel to the commit sha");
     }
 }
