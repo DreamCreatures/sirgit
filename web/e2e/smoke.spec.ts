@@ -26,6 +26,10 @@ test.beforeAll(() => {
       },
     })
   g('init -q -b main')
+  // repo-local identity: the UI commit runs through the SERVER's git spawn,
+  // which has none of the env above and no global config on CI
+  g('config user.name E2E')
+  g('config user.email e2e@sirgit')
   writeFileSync(join(repoPath, 'hello.txt'), 'hello world\n')
   g('add .')
   g('commit -qm "initial commit"')
