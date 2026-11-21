@@ -617,8 +617,9 @@ mod tests {
                 .output()
                 .unwrap()
         };
-        assert!(git(&["init", "-q"]).status.success());
-
+        assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
         let sha = create_orphan(tmp.to_str().unwrap(), "orphan test").await.unwrap();
         assert_eq!(sha.len(), 40);
 
@@ -659,6 +660,8 @@ mod tests {
                 .unwrap()
         };
         assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
         std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
         assert!(git(&["add", "."]).status.success());
         assert!(git(&["commit", "-q", "-m", "c1"]).status.success());
@@ -709,6 +712,8 @@ mod tests {
                 .unwrap()
         };
         assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
         std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
         assert!(git(&["add", "."]).status.success());
         assert!(git(&["commit", "-q", "-m", "c1"]).status.success());
@@ -768,6 +773,8 @@ mod tests {
                 .unwrap()
         };
         assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
         std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
         assert!(git(&["add", "."]).status.success());
         assert!(git(&["commit", "-q", "-m", "c1"]).status.success());
@@ -809,6 +816,8 @@ mod tests {
                 .unwrap()
         };
         assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
         std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
         assert!(git(&["add", "."]).status.success());
         assert!(git(&["commit", "-q", "-m", "c1"]).status.success());
@@ -844,6 +853,8 @@ mod tests {
                 .unwrap()
         };
         assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
         std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
         assert!(git(&["add", "."]).status.success());
         assert!(git(&["commit", "-q", "-m", "c1"]).status.success());

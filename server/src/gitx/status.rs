@@ -359,7 +359,9 @@ mod tests {
                 .env("GIT_COMMITTER_NAME", "T").env("GIT_COMMITTER_EMAIL", "t@t")
                 .output().unwrap()
         };
-        assert!(git(&["init", "-q"]).status.success());
+        assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
         std::fs::write(tmp.join("a.txt"), "hello\n").unwrap();
         assert!(git(&["add", "."]).status.success());
         assert!(git(&["commit", "-q", "-m", "c1"]).status.success());

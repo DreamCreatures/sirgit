@@ -148,7 +148,9 @@ mod tests {
                 .output()
                 .unwrap()
         };
-        assert!(git(&["init", "-q"], &tmp).status.success());
+        assert!(git(&["init", "-q", "-b", "main"], &tmp).status.success());
+        assert!(git(&["config", "user.name", "T"], &tmp).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"], &tmp).status.success());
         std::fs::write(tmp.join("f.txt"), "one\n").unwrap();
         assert!(git(&["add", "."], &tmp).status.success());
         assert!(git(&["commit", "-q", "-m", "first"], &tmp).status.success());
@@ -163,7 +165,9 @@ mod tests {
         let tmp2 = std::env::temp_dir().join(format!("sirgit-logtest2-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp2);
         std::fs::create_dir_all(&tmp2).unwrap();
-        assert!(git(&["init", "-q"], &tmp2).status.success());
+        assert!(git(&["init", "-q", "-b", "main"], &tmp2).status.success());
+        assert!(git(&["config", "user.name", "T"], &tmp2).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"], &tmp2).status.success());
         let rows2 = build_rows(tmp2.to_str().unwrap()).await.unwrap();
         assert!(rows2.is_empty());
 
