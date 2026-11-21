@@ -472,7 +472,11 @@ pub async fn fetch(
         args.push("--prune".into());
     }
     args.push(remote.to_string());
-    run_git(&w, &args, GitKind::Network).await.map(|_| ())
+    run_git(&w, &args, GitKind::Network).await?;
+    // which tags exist on the remote now (drives og/<tag> in the UI);
+    // best-effort — a failed ls-remote keeps the previous cache
+    let _ = super::remote_tags::refresh(repo, remote).await;
+    Ok(())
 }
 
 /// Push. refspec is e.g. "main" or "main:main" or "refs/tags/v1:refs/tags/v1".
@@ -486,7 +490,11 @@ pub async fn push(repo: &str, remote: &str, refspec: &str, force: bool, extra: &
     }
     args.push(remote.to_string());
     args.push(refspec.to_string());
-    run_git(&w, &args, GitKind::Network).await.map(|_| ())
+    run_git(&w, &args, GitKind::Network).await?;
+    // the push may have shipped a tag — refresh the remote-tag cache so its
+    // chip flips to og/<tag> on the refs re-poll this op's completion bumps
+    let _ = super::remote_tags::refresh(repo, remote).await;
+    Ok(())
 }
 
 /// Pull = fetch + fast-forward-only merge of the current branch's upstream.
@@ -538,15 +546,20 @@ pub async fn pull(repo: &str, branch: Option<&str>, extra: &[String]) -> Result<
         } else {
             margs.push(format!("{}/{}", remote, merge_ref));
         }
-        run_git(&w, &margs, GitKind::Mutation).await.map(|_| ())
+        run_git(&w, &margs, GitKind::Mutation).await?;
     } else {
         // fast-forward a non-checked-out branch: refspec without "+" refuses non-ff
         let mut fargs: Vec<String> = extra.to_vec();
         fargs.push("fetch".to_string());
         fargs.push(remote.clone());
         fargs.push(format!("{}:{}", merge_ref, branch));
-        run_git(&w, &fargs, GitKind::Network).await.map(|_| ())
+        run_git(&w, &fargs, GitKind::Network).await?;
     }
+    // pull talked to the remote — refresh the remote-tag cache too
+    if remote != "." {
+        let _ = super::remote_tags::refresh(repo, &remote).await;
+    }
+    Ok(())
 }
 
 /// Clone into `dir`. Long-running; caller surfaces stderr as progress.

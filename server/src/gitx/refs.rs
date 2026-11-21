@@ -42,6 +42,9 @@ pub struct RefsSnapshot {
     pub tags: Vec<RefInfo>,
     pub remotes: Vec<String>,
     pub head: Head,
+    /// tag names that exist on the remote (ls-remote cache, refreshed after
+    /// every fetch/push/pull) — drives the UI's `og/<tag>` rendering
+    pub remote_tags: Vec<String>,
     /// Short upstream name of the current branch (e.g. "origin/main"), if any
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
@@ -56,7 +59,7 @@ const REF_FORMAT: &str = "%(objectname)%1f%(refname)%1f%(upstream:short)%1f%(*ob
 
 /// Full ref snapshot: local branches, remote branches, tags, remotes, HEAD.
 pub async fn read_refs(path: &str) -> Result<RefsSnapshot, super::errors::GitError> {
-    let (worktree, _gitdir) = resolve_repo_paths(path).map_err(|e| {
+    let (worktree, gitdir) = resolve_repo_paths(path).map_err(|e| {
         super::errors::GitError::new("not-a-repository", e, "resolve-repo", "")
     })?;
 
@@ -147,7 +150,9 @@ pub async fn read_refs(path: &str) -> Result<RefsSnapshot, super::errors::GitErr
         }
     }
 
-    Ok(RefsSnapshot { branches, remote_branches, tags, remotes, head, upstream, ahead, behind })
+    let remote_tags = super::remote_tags::read_cached(&gitdir);
+
+    Ok(RefsSnapshot { branches, remote_branches, tags, remotes, head, remote_tags, upstream, ahead, behind })
 }
 
 pub async fn read_remotes(worktree: &Path) -> Result<Vec<String>, super::errors::GitError> {

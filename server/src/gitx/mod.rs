@@ -4,6 +4,7 @@ pub mod log;
 pub mod ops;
 pub mod proc;
 pub mod refs;
+pub mod remote_tags;
 pub mod repo;
 pub mod stash;
 pub mod status;
