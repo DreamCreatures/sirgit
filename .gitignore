@@ -1,0 +1,21 @@
+# Rust
+server/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Env / local
+.env
+.env.local
+.DS_Store
+
+# Test artifacts
+test-results/
+playwright-report/
+docs/perf/
+/bin/
+*.tgz
+.zcode/

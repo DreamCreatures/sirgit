@@ -1,0 +1,34 @@
+{
+  "name": "sirgit",
+  "version": "0.1.0",
+  "description": "A fast, visual git client — built as a thank-you to ungit. One Rust binary, zero runtime dependencies.",
+  "keywords": [
+    "git",
+    "gui",
+    "ungit",
+    "graph",
+    "client"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DreamCreatures/sirgit.git"
+  },
+  "bin": {
+    "sirgit": "bin/sirgit"
+  },
+  "files": [
+    "bin/sirgit",
+    "README.md"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "scripts": {
+    "prepare": "node scripts/prepare-bin.mjs",
+    "prepack": "node scripts/prepare-bin.mjs"
+  }
+}

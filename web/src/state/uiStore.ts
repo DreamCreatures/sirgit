@@ -1,0 +1,249 @@
+import { create } from 'zustand'
+
+export interface Toast {
+  id: number
+  kind: 'error' | 'info' | 'success'
+  title: string
+  detail?: string
+}
+
+/**
+ * In-app replacement for window.prompt/confirm — embedded browsers (and
+ * Playwright) suppress native dialogs, so every prompt/confirm flow goes
+ * through this. Callbacks are transient closures, not persisted anywhere.
+ */
+export type AppDialog =
+  | {
+      kind: 'confirm'
+      title: string
+      message?: string
+      confirmLabel?: string
+      danger?: boolean
+      /** returning a Promise keeps the dialog open with a spinner until it settles */
+      onConfirm: () => void | Promise<unknown>
+      /** commit-creating op: its target sha — hovering the confirm previews the ghost node above it */
+      ghostPreview?: string
+    }
+  | {
+      kind: 'prompt'
+      title: string
+      initial: string
+      confirmLabel?: string
+      note?: string
+      /** returning a Promise keeps the dialog open with a spinner until it settles */
+      onConfirm: (value: string) => void | Promise<unknown>
+      /** commit-creating op: its target sha — hovering the confirm previews the ghost node above it */
+      ghostPreview?: string
+    }
+
+/** What the user clicked: a branch/tag/remote ref, or nothing (the commit node itself). */
+export interface SelectedRef {
+  kind: 'branch' | 'tag' | 'remote-branch'
+  name: string
+}
+
+interface UiState {
+  selectedSha: string | null
+  /**
+   * The ref the user explicitly picked (branch chip/row click) — null when
+   * they selected the commit node itself. Branch/tag actions operate on the
+   * ref; node actions (Details, create branch/tag) on the commit. Splitting
+   * these keeps sibling branches on one commit individually selectable.
+   */
+  selectedRef: SelectedRef | null
+  select(sha: string | null, ref?: SelectedRef | null): void
+
+  /** Native-dialog replacement (confirm / prompt with input) */
+  dialog: AppDialog | null
+  setDialog(d: AppDialog | null): void
+
+  stagingOpen: boolean
+  toggleStaging(): void
+
+  /** Stash section (above the staging area) expanded */
+  stashOpen: boolean
+  toggleStash(): void
+
+  /**
+   * One-shot commit-box prefill (amend-style) — set by squash merge with the
+   * messages gathered from the squashed commits; the staging panel consumes
+   * and clears it so the user reviews and commits.
+   */
+  commitPrefill: { title: string; body: string } | null
+  setCommitPrefill(v: { title: string; body: string } | null): void
+
+  /** Staging panel grown inline (taller commit box + changes area) */
+  stagingExpanded: boolean
+  setStagingExpanded(v: boolean): void
+
+  /** an action that would create a commit is hovered — the sha its new commit lands on (ghost preview target) */
+  ghostPreview: string | null
+  setGhostPreview(v: string | null): void
+
+  toasts: Toast[]
+  toast(t: Omit<Toast, 'id'>): void
+  dismissToast(id: number): void
+
+  credentialsRequest: { opId: string; remote: string } | null
+  setCredentialsRequest(req: { opId: string; remote: string } | null): void
+
+  /** Label of the running network op (fetch/pull/push) across all panels, null when idle */
+  netBusy: string | null
+  setNetBusy(label: string | null): void
+
+  /**
+   * Any repo-altering op is in flight (network or local: push, checkout,
+   * rebase, move, commit, …). Every mutating helper wraps its promise in
+   * beginOp/endOp; the BusyOverlay then blocks the whole app (below
+   * dialogs/modals/credentials, which stay usable for their own flow).
+   */
+  busyCount: number
+  busyLabel: string | null
+  beginOp(label: string): void
+  endOp(): void
+
+  /**
+   * Hover preview for a row action button (ungit-style): which operation,
+   * on which target row, by which armed subject. Drives the on-graph
+   * preview overlay (rebase stack, squash rings, move rings) and the
+   * spotlight dimming of uninvolved rows.
+   */
+  actionPreview: { op: 'move' | 'rebase' | 'squash' | 'merge' | 'squash-merge'; targetSha: string; subjectTipSha: string; subjectBranch: string } | null
+  setActionPreview(v: UiState['actionPreview']): void
+
+  /**
+   * Post-checkout: scroll the graph to this row once it is (re)loaded —
+   * a branch checked out from the sidebar may tip far off-screen.
+   */
+  scrollToSha: string | null
+  requestScrollTo(sha: string): void
+  clearScrollTo(): void
+
+  /** Commit whose details are shown in the right drawer (opened via the [Details] action) */
+  detailsSha: string | null
+  setDetailsSha(sha: string | null): void
+
+  /** Open squash modal: branch → target picked, awaiting confirmation */
+  squashModal: { branch: string; branchTipSha: string; targetSha: string } | null
+  setSquashModal(v: { branch: string; branchTipSha: string; targetSha: string } | null): void
+
+  /** Panel layout: left sidebar width/collapsed, right drawer width (persisted) */
+  refsPanelWidth: number
+  refsPanelCollapsed: boolean
+  commitDetailWidth: number
+  setRefsPanelWidth(w: number): void
+  setRefsPanelCollapsed(v: boolean): void
+  setCommitDetailWidth(w: number): void
+
+  recentRepos: string[]
+  addRecentRepo(path: string): void
+  removeRecentRepo(path: string): void
+}
+
+let toastId = 0
+
+const RECENTS_KEY = 'sirgit.recentRepos'
+
+function loadNum(key: string, fallback: number): number {
+  const v = parseInt(localStorage.getItem(key) ?? '', 10)
+  return Number.isFinite(v) && v > 0 ? v : fallback
+}
+
+function loadRecents(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]') as string[]
+  } catch {
+    return []
+  }
+}
+
+export const useUiStore = create<UiState>((set, get) => ({
+  selectedSha: null,
+  selectedRef: null,
+  select: (sha, ref) => set({ selectedSha: sha, selectedRef: ref ?? null, actionPreview: null }),
+
+  dialog: null,
+  setDialog: (d) => set({ dialog: d }),
+
+  stagingOpen: true,
+  toggleStaging: () => set((s) => ({ stagingOpen: !s.stagingOpen })),
+
+  stashOpen: true,
+  toggleStash: () => set((s) => ({ stashOpen: !s.stashOpen })),
+
+  commitPrefill: null,
+  setCommitPrefill: (v) => set({ commitPrefill: v }),
+
+  stagingExpanded: localStorage.getItem('sirgit.stagingExpanded') === '1',
+  setStagingExpanded: (v) => {
+    localStorage.setItem('sirgit.stagingExpanded', v ? '1' : '0')
+    set({ stagingExpanded: v })
+  },
+
+  ghostPreview: null,
+  setGhostPreview: (v) => set({ ghostPreview: v }),
+
+  toasts: [],
+  toast(t) {
+    const id = ++toastId
+    set((s) => ({ toasts: [...s.toasts, { ...t, id }] }))
+    setTimeout(() => get().dismissToast(id), t.kind === 'error' ? 8000 : 3500)
+  },
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+  credentialsRequest: null,
+  setCredentialsRequest: (req) => set({ credentialsRequest: req }),
+
+  netBusy: null,
+  setNetBusy: (label) => set({ netBusy: label }),
+
+  busyCount: 0,
+  busyLabel: null,
+  beginOp: (label) => set((s) => ({ busyCount: s.busyCount + 1, busyLabel: label })),
+  endOp: () =>
+    set((s) => ({ busyCount: Math.max(0, s.busyCount - 1), busyLabel: s.busyCount <= 1 ? null : s.busyLabel })),
+
+  actionPreview: null,
+  setActionPreview: (v: UiState['actionPreview']) => set({ actionPreview: v }),
+
+  scrollToSha: null,
+  requestScrollTo: (sha) => set({ scrollToSha: sha }),
+  clearScrollTo: () => set({ scrollToSha: null }),
+
+  squashModal: null,
+  setSquashModal: (v: UiState['squashModal']) => set({ squashModal: v }),
+
+  detailsSha: null,
+  setDetailsSha: (sha) => set({ detailsSha: sha }),
+
+  // 234px minimum: below this the Fetch/Pull row in the panel header wraps/overlaps
+  refsPanelWidth: Math.max(234, loadNum('sirgit.refsPanelWidth', 256)),
+  refsPanelCollapsed: localStorage.getItem('sirgit.refsPanelCollapsed') === '1',
+  commitDetailWidth: loadNum('sirgit.commitDetailWidth', 440),
+  setRefsPanelWidth: (w) => {
+    const clamped = Math.max(234, Math.min(520, Math.round(w)))
+    localStorage.setItem('sirgit.refsPanelWidth', String(clamped))
+    set({ refsPanelWidth: clamped })
+  },
+  setRefsPanelCollapsed: (v) => {
+    localStorage.setItem('sirgit.refsPanelCollapsed', v ? '1' : '0')
+    set({ refsPanelCollapsed: v })
+  },
+  setCommitDetailWidth: (w) => {
+    const clamped = Math.max(320, Math.min(820, Math.round(w)))
+    localStorage.setItem('sirgit.commitDetailWidth', String(clamped))
+    set({ commitDetailWidth: clamped })
+  },
+
+  recentRepos: loadRecents(),
+  addRecentRepo(path) {
+    const next = [path, ...get().recentRepos.filter((r) => r !== path)].slice(0, 12)
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next))
+    set({ recentRepos: next })
+  },
+  removeRecentRepo(path) {
+    const next = get().recentRepos.filter((r) => r !== path)
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next))
+    set({ recentRepos: next })
+  },
+}))
