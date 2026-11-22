@@ -136,6 +136,14 @@ interface UiState {
   detailsSha: string | null
   setDetailsSha(sha: string | null): void
 
+  /**
+   * One-shot seed for the home page's Open input — set by the repo page's
+   * back arrow to the previous repo's PARENT directory (with trailing slash,
+   * so the sibling autocomplete opens ready). Consumed on HomePage mount.
+   */
+  backSeedPath: string | null
+  setBackSeedPath(v: string | null): void
+
   /** Open squash modal: branch → target picked, awaiting confirmation */
   squashModal: { branch: string; branchTipSha: string; targetSha: string } | null
   setSquashModal(v: { branch: string; branchTipSha: string; targetSha: string } | null): void
@@ -152,11 +160,30 @@ interface UiState {
   addRecentRepo(path: string): void
   removeRecentRepo(path: string): void
   clearRecentRepos(): void
+
+  /**
+   * The home page's repository list — a growing union of imports: submitting
+   * a working directory adds its valid repos, cloning adds the clone's
+   * directory; unique by directory (multiple roots accumulate, no fixed root).
+   */
+  repos: string[]
+  addRepos(paths: string[]): void
+  removeRepo(path: string): void
+  clearRepos(): void
 }
 
 let toastId = 0
 
 const RECENTS_KEY = 'sirgit.recentRepos'
+const REPOS_KEY = 'sirgit.repos'
+
+function loadRepos(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(REPOS_KEY) ?? '[]') as string[]
+  } catch {
+    return []
+  }
+}
 
 function loadNum(key: string, fallback: number): number {
   const v = parseInt(localStorage.getItem(key) ?? '', 10)
@@ -245,6 +272,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   detailsSha: null,
   setDetailsSha: (sha) => set({ detailsSha: sha }),
 
+  backSeedPath: null,
+  setBackSeedPath: (v) => set({ backSeedPath: v }),
+
   // 234px minimum: keeps the panel's branch/tag rows and header controls
   // (filter toggle + collapse) from crowding
   refsPanelWidth: Math.max(234, loadNum('sirgit.refsPanelWidth', 256)),
@@ -267,7 +297,8 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   recentRepos: loadRecents(),
   addRecentRepo(path) {
-    const next = [path, ...get().recentRepos.filter((r) => r !== path)].slice(0, 12)
+    // top-10 cap (user rule) — recency order, deduped
+    const next = [path, ...get().recentRepos.filter((r) => r !== path)].slice(0, 10)
     localStorage.setItem(RECENTS_KEY, JSON.stringify(next))
     set({ recentRepos: next })
   },
@@ -279,5 +310,22 @@ export const useUiStore = create<UiState>((set, get) => ({
   clearRecentRepos() {
     localStorage.setItem(RECENTS_KEY, '[]')
     set({ recentRepos: [] })
+  },
+
+  repos: loadRepos(),
+  addRepos(paths) {
+    const cur = get().repos
+    const next = [...paths.filter((p) => !cur.includes(p)), ...cur].slice(0, 200)
+    localStorage.setItem(REPOS_KEY, JSON.stringify(next))
+    set({ repos: next })
+  },
+  removeRepo(path) {
+    const next = get().repos.filter((r) => r !== path)
+    localStorage.setItem(REPOS_KEY, JSON.stringify(next))
+    set({ repos: next })
+  },
+  clearRepos() {
+    localStorage.setItem(REPOS_KEY, '[]')
+    set({ repos: [] })
   },
 }))

@@ -46,6 +46,9 @@ export default function RepoPage() {
     fetchedOnce.current = false
     useUiStore.getState().select(null)
     useUiStore.getState().clearScrollTo()
+    // visiting registers in Recent — covers direct-URL entry, so the repo you
+    // just backed from is always in the home page's recent list
+    useUiStore.getState().addRecentRepo(path)
     reset(path)
   }, [path, reset])
 
@@ -543,7 +546,17 @@ export default function RepoPage() {
     <div className="flex h-full flex-col">
       {/* header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-900/60 px-4">
-        <Link to="/" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200" title="Back to repositories">
+        <Link
+          to="/"
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+          title="Back to repositories"
+          onClick={() => {
+            // seed the home page's Open input with the PARENT directory —
+            // back becomes a sibling picker (autocomplete lists it on mount)
+            const parent = path.replace(/\/+$/, '').replace(/\/[^/]*$/, '') + '/'
+            useUiStore.getState().setBackSeedPath(parent || '/')
+          }}
+        >
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <span className="font-medium text-zinc-100">{repoName}</span>

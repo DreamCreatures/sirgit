@@ -13,8 +13,15 @@ function cleanPath(p: string): string {
 
 export default function HomePage() {
   const navigate = useNavigate()
-  const { recentRepos, addRecentRepo, removeRecentRepo, clearRecentRepos, toast } = useUiStore()
-  const [pathInput, setPathInput] = useState('')
+  const { recentRepos, addRecentRepo, removeRecentRepo, clearRecentRepos, repos, addRepos, removeRepo, clearRepos, toast } =
+    useUiStore()
+  const [pathInput, setPathInput] = useState(() => {
+    // seeded by the repo page's back arrow: the previous repo's parent dir
+    // (consumed once — later direct visits start empty again)
+    const seed = useUiStore.getState().backSeedPath
+    if (seed) useUiStore.getState().setBackSeedPath(null)
+    return seed ?? ''
+  })
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneDest, setCloneDest] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -60,35 +67,47 @@ export default function HomePage() {
     inputRef.current?.focus()
   }
 
-  const openRepo = async (rawPath: string) => {
+  /**
+   * Submit a working directory: imports its valid repos into the list below
+   * (a single repo path imports just itself; multiple roots accumulate over
+   * time, deduped by directory). Submitting never navigates — rows in the
+   * list do. Only dead-end paths fall into the init/create dialogs.
+   */
+  const submitPath = async (rawPath: string) => {
     const path = cleanPath(rawPath)
     if (!path) return
     setBusy(path)
     try {
       const qs = await api.quickstatus(path)
       if (qs.type === 'repo' || qs.type === 'bare') {
-        addRecentRepo(path)
-        navigate(`/repository?path=${encodeURIComponent(path)}`)
+        addRepos([qs.gitRootPath ?? path])
+        toast({ kind: 'success', title: 'Added to repositories', detail: qs.gitRootPath ?? path })
       } else if (qs.type === 'uninited') {
-        setBusy(null)
-        useUiStore.getState().setDialog({
-          kind: 'confirm',
-          title: 'Initialize repository',
-          message: `"${path}" is not a git repository. Initialize one here?`,
-          confirmLabel: 'Init',
-          onConfirm: () => {
-            void api
-              .init(path)
-              .then(() => {
-                addRecentRepo(path)
-                navigate(`/repository?path=${encodeURIComponent(path)}`)
-              })
-              .catch((e: unknown) => {
-                const { title: t, detail: d } = friendlyError(e)
-                toast({ kind: 'error', title: t, detail: d })
-              })
-          },
-        })
+        const subs = qs.subRepos ?? []
+        if (subs.length > 0) {
+          addRepos(subs)
+          toast({ kind: 'success', title: `Imported ${subs.length} repositor${subs.length === 1 ? 'y' : 'ies'}`, detail: path })
+        } else {
+          setBusy(null)
+          useUiStore.getState().setDialog({
+            kind: 'confirm',
+            title: 'Initialize repository',
+            message: `"${path}" is not a git repository and holds no repos. Initialize one here?`,
+            confirmLabel: 'Init',
+            onConfirm: () => {
+              void api
+                .init(path)
+                .then(() => {
+                  addRepos([path])
+                  navigate(`/repository?path=${encodeURIComponent(path)}`)
+                })
+                .catch((e: unknown) => {
+                  const { title: t, detail: d } = friendlyError(e)
+                  toast({ kind: 'error', title: t, detail: d })
+                })
+            },
+          })
+        }
       } else {
         setBusy(null)
         // the path does not exist yet — offer to create it and init a repo there
@@ -102,7 +121,7 @@ export default function HomePage() {
               .createDir(path)
               .then(() => api.init(path))
               .then(() => {
-                addRecentRepo(path)
+                addRepos([path])
                 navigate(`/repository?path=${encodeURIComponent(path)}`)
               })
               .catch((e: unknown) => {
@@ -117,6 +136,12 @@ export default function HomePage() {
     } finally {
       setBusy(null)
     }
+  }
+
+  /** click a row in either list → open that repository */
+  const openFromList = (path: string) => {
+    addRecentRepo(path)
+    navigate(`/repository?path=${encodeURIComponent(path)}`)
   }
 
   const onPathKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -143,7 +168,7 @@ export default function HomePage() {
         return
       }
     }
-    if (e.key === 'Enter') void openRepo(pathInput)
+    if (e.key === 'Enter') void submitPath(pathInput)
   }
 
   const doClone = async () => {
@@ -153,6 +178,9 @@ export default function HomePage() {
     try {
       const { opId } = await api.clone(cloneUrl.trim(), dest)
       await pollOp(opId)
+      // clones join the repository list by default (user rule), land in
+      // recent, and open straight away
+      addRepos([dest])
       addRecentRepo(dest)
       navigate(`/repository?path=${encodeURIComponent(dest)}`)
     } catch (e) {
@@ -176,12 +204,12 @@ export default function HomePage() {
       </header>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
-        <h2 className="mb-3 text-sm font-medium text-zinc-400">Open a repository</h2>
+        <h2 className="mb-3 text-sm font-medium text-zinc-400">Add a working directory</h2>
         <div className="relative flex gap-2">
           <input
             ref={inputRef}
             className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
-            placeholder="/absolute/path/to/repo"
+            placeholder="/parent/directory — or a single repo's absolute path"
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
             onKeyDown={onPathKeyDown}
@@ -193,9 +221,10 @@ export default function HomePage() {
           <button
             className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
             disabled={!pathInput.trim() || !!busy}
-            onClick={() => void openRepo(pathInput)}
+            onClick={() => void submitPath(pathInput)}
+            data-testid="add-directory"
           >
-            <ArrowRight className="h-4 w-4" /> Open
+            <ArrowRight className="h-4 w-4" /> Add
           </button>
           {focused && suggest && suggest.entries.length > 0 && (
             <ul
@@ -262,43 +291,74 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* repositories — the growing union of every imported root + clones */}
+      {repos.length > 0 ? (
+        <section data-testid="repo-list">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-zinc-400">Repositories</h2>
+            <button
+              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              onClick={clearRepos}
+              title="Clear the whole repository list"
+              data-testid="clear-repos"
+            >
+              <Trash2 className="h-3 w-3" /> Clear
+            </button>
+          </div>
+          <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-xl border border-zinc-800">
+            {repos.map((r) => (
+              <RepoListRow key={r} path={r} onOpen={() => openFromList(r)} onRemove={() => removeRepo(r)} testid="repo-row" />
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <p className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-800 px-4 py-6 text-sm text-zinc-500">
+          <Plus className="h-4 w-4" /> No repositories yet — add a working directory above to import its repos.
+        </p>
+      )}
+
+      {/* recent — last visited, top 10 */}
       {recentRepos.length > 0 && (
         <section data-testid="recent-repos">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-zinc-400">Recent repositories</h2>
+            <h2 className="text-sm font-medium text-zinc-400">Recent</h2>
             <button
               className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
               onClick={clearRecentRepos}
-              title="Clear the whole recent list"
+              title="Clear the recent list"
               data-testid="clear-recent"
             >
               <Trash2 className="h-3 w-3" /> Clear
             </button>
           </div>
           <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-xl border border-zinc-800">
-            {recentRepos.map((r) => (
-              <RecentRow key={r} path={r} onOpen={() => void openRepo(r)} onRemove={() => removeRecentRepo(r)} />
+            {recentRepos.slice(0, 10).map((r) => (
+              <RepoListRow key={r} path={r} onOpen={() => openFromList(r)} onRemove={() => removeRecentRepo(r)} testid="recent-repo" />
             ))}
           </ul>
         </section>
-      )}
-
-      {recentRepos.length === 0 && (
-        <p className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-800 px-4 py-6 text-sm text-zinc-500">
-          <Plus className="h-4 w-4" /> No repositories yet — open a path above to get started.
-        </p>
       )}
     </div>
   )
 }
 
 /**
- * One recent-repo row. Validates the path server-side (quickstatus) and
- * renders ONLY real repositories — deleted or de-inited paths silently leave
- * the list (user rule: "only display valid path"), while their history
- * entries stay until individually removed or the list is cleared.
+ * One repository row (shared by the repositories list and recent). Validates
+ * the path server-side (quickstatus, cached) and renders ONLY real
+ * repositories — deleted or de-inited paths silently leave the view while
+ * their entries stay until individually removed or the list is cleared.
  */
-function RecentRow({ path, onOpen, onRemove }: { path: string; onOpen: () => void; onRemove: () => void }) {
+function RepoListRow({
+  path,
+  onOpen,
+  onRemove,
+  testid,
+}: {
+  path: string
+  onOpen: () => void
+  onRemove: () => void
+  testid: string
+}) {
   const qs = useQuery({
     queryKey: ['quickstatus', path],
     queryFn: () => api.quickstatus(path),
@@ -307,7 +367,7 @@ function RecentRow({ path, onOpen, onRemove }: { path: string; onOpen: () => voi
   })
   if (!qs.data || (qs.data.type !== 'repo' && qs.data.type !== 'bare')) return null
   return (
-    <li className="flex items-center gap-3 bg-zinc-900/40 px-4 py-2.5 hover:bg-zinc-900" data-testid="recent-repo">
+    <li className="flex items-center gap-3 bg-zinc-900/40 px-4 py-2.5 hover:bg-zinc-900" data-testid={testid}>
       <FolderGit2 className="h-4 w-4 shrink-0 text-zinc-500" />
       <button
         className="min-w-0 flex-1 truncate text-left font-mono text-sm text-zinc-200 hover:text-emerald-400"
