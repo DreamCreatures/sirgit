@@ -161,11 +161,16 @@ export default function GraphView({
   const showTether = headIdx >= 0 && headLane >= 0 && !ghostSha
   const headCenterY = headIdx * ROW_H + ghostOffset + ROW_H / 2
   const tetherCx = originX + laneX(headLane)
-  // clamp: rest in the reserved top slot, rise with the viewport top once
-  // that slot scrolls out, and never slide below one row above HEAD
-  const tetherTop = Math.max(ROW_H / 2, Math.min(scrollTop + ROW_H / 2, headCenterY - ROW_H))
-  const tetherPinned = tetherTop > ROW_H / 2 + 1
-  const tetherRows = Math.max(0, Math.round((headCenterY - tetherTop) / ROW_H) - 1)
+  // two regimes: HEAD at/below the viewport top → circle clamps between the
+  // reserved top slot and one row above HEAD (pinned to the viewport top
+  // while scrolling, riding down to HEAD as it arrives); HEAD fully ABOVE
+  // the viewport → circle pins at the viewport top with a "↑N" badge and no
+  // guide line (HEAD is above it)
+  const headAboveViewport = headCenterY < scrollTop + ROW_H / 2
+  const tetherTop = headAboveViewport
+    ? scrollTop + ROW_H / 2
+    : Math.max(ROW_H / 2, Math.min(scrollTop + ROW_H / 2, headCenterY - ROW_H))
+  const tetherRows = Math.max(0, Math.round(Math.abs(headCenterY - tetherTop) / ROW_H) - (headAboveViewport ? 0 : 1))
 
   const visibleRows = useMemo(() => ordered.slice(start, end), [ordered, start, end])
 
@@ -324,17 +329,21 @@ export default function GraphView({
             data-testid="head-tether"
           >
             <svg width="100%" height="100%">
-              {/* dashed guide line from the circle down to HEAD's ring */}
-              <line
-                x1={tetherCx}
-                y1={24}
-                x2={tetherCx}
-                y2={24 + (headCenterY - tetherTop) - 17}
-                stroke={laneColor(headLane)}
-                strokeWidth={2}
-                strokeDasharray="3 6"
-                opacity={0.55}
-              />
+              {/* dashed guide line from the circle down to HEAD's ring —
+               * only when HEAD is below the circle (scrolled-past HEAD has
+               * no line, the ↑N badge says it all) */}
+              {headCenterY - tetherTop > 20 && (
+                <line
+                  x1={tetherCx}
+                  y1={24}
+                  x2={tetherCx}
+                  y2={24 + (headCenterY - tetherTop) - 17}
+                  stroke={laneColor(headLane)}
+                  strokeWidth={2}
+                  strokeDasharray="3 6"
+                  opacity={0.55}
+                />
+              )}
               {nextCommit && <circle cx={tetherCx} cy={24} r={12} fill="#18181b" />}
               <circle
                 cx={tetherCx}
@@ -355,7 +364,7 @@ export default function GraphView({
               onClick={() => useUiStore.getState().requestScrollTo(headSha!)}
               data-testid="head-tether-button"
             />
-            {tetherPinned && tetherRows > 0 && (
+            {headAboveViewport && tetherRows > 0 && (
               <span
                 className="absolute rounded-full border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-400"
                 style={{ left: tetherCx + 14, top: 16 }}
