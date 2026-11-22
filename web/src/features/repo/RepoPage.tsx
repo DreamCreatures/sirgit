@@ -457,6 +457,9 @@ export default function RepoPage() {
       .checkout(path, name, trackFrom, carry)
       .then(() => {
         toast({ kind: 'success', title: `Checked out ${name}` })
+        // the switch is done — drop the selection so the action bar and the
+        // chip ring don't linger on the branch we got here through
+        useUiStore.getState().select(null)
         // bring the new HEAD into view — the tip may sit far off-screen
         const sha =
           refs?.branches.find((b) => b.name === name)?.sha ??
@@ -478,11 +481,18 @@ export default function RepoPage() {
   // uncommitted changes before git acts — bring them along
   // (stash → checkout → pop), stash them and leave them (stash → checkout),
   // or cancel and stay. Clean worktree (or a merge/rebase in flight, where
-  // checkout would be refused anyway) goes straight through.
+  // checkout would be refused anyway) goes straight through — and so does a
+  // ref pointing at the SAME commit as HEAD (sibling branches on one node,
+  // or the current branch itself): identical trees carry the changes across
+  // risk-free, so the bring/stash question would be noise.
   const guardedCheckout = (name: string, trackFrom?: string) => {
     const inProgress =
       !!statusSnap && (statusSnap.inMerge || statusSnap.inRebase || statusSnap.inCherry || statusSnap.inRevert)
-    if (!statusSnap || statusSnap.files.length === 0 || inProgress) {
+    const targetSha = trackFrom
+      ? refs?.remoteBranches.find((r) => r.name === trackFrom)?.sha
+      : (refs?.branches.find((b) => b.name === name)?.sha ?? refs?.tags.find((t) => t.name === name)?.sha)
+    const sameCommit = targetSha != null && targetSha === refs?.head?.sha
+    if (!statusSnap || statusSnap.files.length === 0 || inProgress || sameCommit) {
       void checkoutBranch(name, trackFrom)
       return
     }
@@ -547,6 +557,8 @@ export default function RepoPage() {
                 ? `${local} ${reset ? 'reset' : 'fast-forwarded'} to ${remoteRef}`
                 : `Checked out ${local} at ${remoteRef}`,
           })
+          // switched branches — don't leave the action bar on the old selection
+          useUiStore.getState().select(null)
           const sha = reset ? remoteTip : remoteTip ?? localBranch.sha
           if (sha) useUiStore.getState().requestScrollTo(sha)
           refreshAll()
