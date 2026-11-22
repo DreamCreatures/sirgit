@@ -75,3 +75,23 @@ jobs:
             bin/sirgit
             *.tgz
           generate_release_notes: true
+
+      # Post-release: leave the repo READY for the next release — bump both
+      # version files to the next patch (v0.2.0 ships → files become 0.2.1).
+      # Runs only after publish + GitHub Release succeeded, so a failed
+      # release leaves the version untouched. GITHUB_TOKEN pushes don't
+      # trigger workflows (no recursion); the rebase keeps the push
+      # fast-forwardable when main moved since the tag.
+      - name: bump to next patch version
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$V"
+          NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
+          jq --arg v "$NEXT" '.version = $v' package.json > /tmp/pkg.json && mv /tmp/pkg.json package.json
+          sed -i '' -E "s/^version = \".*\"/version = \"$NEXT\"/" server/Cargo.toml
+          git config user.name "release-bot" && git config user.email "release-bot@users.noreply.github.com"
+          git add package.json server/Cargo.toml
+          git commit -m "chore: bump version to $NEXT"
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
