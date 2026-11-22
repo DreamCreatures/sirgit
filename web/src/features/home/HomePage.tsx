@@ -15,13 +15,13 @@ export default function HomePage() {
   const navigate = useNavigate()
   const { recentRepos, addRecentRepo, removeRecentRepo, clearRecentRepos, repos, addRepos, removeRepo, clearRepos, toast } =
     useUiStore()
-  const [pathInput, setPathInput] = useState(() => {
-    // seeded by the repo page's back arrow: the previous repo's parent dir
-    // (consumed once — later direct visits start empty again)
-    const seed = useUiStore.getState().backSeedPath
-    if (seed) useUiStore.getState().setBackSeedPath(null)
-    return seed ?? ''
-  })
+  const [pathInput, setPathInput] = useState(() => useUiStore.getState().backSeedPath ?? '')
+  useEffect(() => {
+    // seeded by the repo page's back arrow (the previous repo's parent dir).
+    // Consume AFTER mount — clearing the store during render makes React
+    // discard and retry the first render, and the retry would read null
+    useUiStore.getState().setBackSeedPath(null)
+  }, [])
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneDest, setCloneDest] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
