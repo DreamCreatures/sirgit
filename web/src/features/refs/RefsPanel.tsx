@@ -12,7 +12,7 @@ import { friendlyError } from '../../lib/gitErrors'
  * Left panel: branches, remote branches, tags — with checkout, delete,
  * create-branch/tag, remote management, and per-remote fetch (click a remote
  * row). Repo-wide Fetch/Pull live in the top header only. The panel header
- * carries the branch-list filter (all | tracking | recent) — SIDEBAR-ONLY:
+ * carries the branch-list filter (all | local | recent) — SIDEBAR-ONLY:
  * the graph map always shows every branch.
  */
 export default function RefsPanel({ path }: { path: string }) {
@@ -133,11 +133,9 @@ export default function RefsPanel({ path }: { path: string }) {
   const RECENT_WINDOW_S = 30 * 24 * 3600
   const visibleBranches = pinAndSort(
     branches.filter((b) => {
-      if (branchFilter === 'all') return true
+      // 'local' keeps every local branch — it hides the sections below instead
+      if (branchFilter === 'all' || branchFilter === 'local') return true
       if (b.name === head?.branch) return true
-      if (branchFilter === 'tracking') {
-        return b.upstream != null || remoteBranches.some((r) => r.name.endsWith(`/${b.name}`))
-      }
       const tipDate = rowsBySha.get(b.sha)?.commitDate ?? 0
       return Date.now() / 1000 - tipDate <= RECENT_WINDOW_S
     }),
@@ -168,7 +166,7 @@ export default function RefsPanel({ path }: { path: string }) {
           {(
             [
               ['all', 'All', 'All branches'],
-              ['tracking', 'Track', 'Only branches with a remote twin (<remote>/<branch>) or an upstream'],
+              ['local', 'Local', 'Only local branches — remote branches, tags and remotes are hidden'],
               ['recent', 'Recent', 'Only branches with commits in the last month'],
             ] as const
           ).map(([value, label, title]) => (
@@ -252,6 +250,9 @@ export default function RefsPanel({ path }: { path: string }) {
         )}
       </Section>
 
+      {/* Local = only the local branches above — everything remote/tag hides */}
+      {branchFilter !== 'local' && (
+        <>
       <Section title={`Remote branches (${remoteBranches.length})`}>
         {sortedRemoteBranches.map((b) => {
           const remote = b.name.split('/')[0]
@@ -344,6 +345,8 @@ export default function RefsPanel({ path }: { path: string }) {
         ))}
         {remotes.length === 0 && <p className="px-2 py-1 text-xs text-zinc-600">no remotes</p>}
       </Section>
+        </>
+      )}
 
       </div>
 

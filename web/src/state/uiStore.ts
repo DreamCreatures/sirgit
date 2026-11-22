@@ -70,12 +70,12 @@ interface UiState {
 
   /**
    * Left-panel branch-list filter. Graph map is NEVER filtered — only this
-   * list shrinks. tracking = has a <remote>/<name> twin or upstream set;
-   * recent = tip committed within the last month (current branch always
-   * listed).
+   * panel shrinks. local = only the local Branches section shows (remote
+   * branches, tags and remotes are hidden); recent = tip committed within
+   * the last month (current branch always listed).
    */
-  branchFilter: 'all' | 'tracking' | 'recent'
-  setBranchFilter(v: 'all' | 'tracking' | 'recent'): void
+  branchFilter: 'all' | 'local' | 'recent'
+  setBranchFilter(v: 'all' | 'local' | 'recent'): void
 
   /**
    * One-shot commit-box prefill (amend-style) — set by squash merge with the
@@ -247,9 +247,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ subjectCompact: v })
   },
 
-  branchFilter: ((): 'all' | 'tracking' | 'recent' => {
+  branchFilter: ((): 'all' | 'local' | 'recent' => {
     const v = localStorage.getItem('sirgit.branchFilter')
-    return v === 'tracking' || v === 'recent' ? v : 'all'
+    if (v === 'recent') return v
+    // 'tracking' is the legacy value from before Track was replaced by Local
+    return v === 'local' || v === 'tracking' ? 'local' : 'all'
   })(),
   setBranchFilter: (v) => {
     localStorage.setItem('sirgit.branchFilter', v)
