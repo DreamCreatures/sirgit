@@ -24,7 +24,6 @@ function GraphEdgesInner({
   end,
   offset = 0,
   gapAfter = -1,
-  dragIdx = -1,
   gapSize = 0,
   dim = false,
   originX = 0,
@@ -34,8 +33,6 @@ function GraphEdgesInner({
   offset?: number
   /** selection gap: the selected row sits gapSize lower, rows below it 2×gapSize (-1 = none) */
   gapAfter?: number
-  /** drag-over spread: row dragIdx stays put, siblings shift ±gapSize (-1 = none; wins over gapAfter) */
-  dragIdx?: number
   gapSize?: number
   dim?: boolean
   originX?: number
@@ -44,18 +41,7 @@ function GraphEdgesInner({
   const laneCount = useGraphStore((s) => s.laneLayout.laneCount)
   // layer placement under the gaps: uniformly shifted when the gaps are above
   // the window, taller when a gap falls inside it
-  const gOf = (i: number) =>
-    dragIdx >= 0 && gapSize > 0
-      ? i === dragIdx
-        ? 0
-        : i > dragIdx
-          ? gapSize
-          : -gapSize
-      : gapAfter < 0 || gapSize <= 0 || i < gapAfter
-        ? 0
-        : i === gapAfter
-          ? gapSize
-          : 2 * gapSize
+  const gOf = (i: number) => (gapAfter < 0 || gapSize <= 0 || i < gapAfter ? 0 : i === gapAfter ? gapSize : 2 * gapSize)
   const shift = gOf(start)
   const extra = gOf(end) - gOf(start)
 
@@ -89,7 +75,7 @@ function GraphEdgesInner({
       colors.push(laneColor(e.fromLane))
     }
     return { out, colors }
-  }, [edges, start, end, gapAfter, dragIdx, gapSize])
+  }, [edges, start, end, gapAfter, gapSize])
 
   if (!paths || paths.out.length === 0) {
     return (

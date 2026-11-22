@@ -129,32 +129,28 @@ export default function GraphView({
   const ghostLane = ghostIdx >= 0 ? (laneLayout.lanes.get(ghostSha!) ?? -1) : -1
   const showGhost = ghostIdx >= 0 && ghostLane >= 0
   const ghostOffset = totalRows > 0 ? ROW_H : 0
-  // --- row gaps: a row can demand breathing room two ways. (1) SELECTION:
-  // while a row's action popup is up, it gains 50% of a row on BOTH sides —
-  // the bar tucks into its top padding and never covers the row above (the
-  // move/drag target). (2) DRAG-OVER: the row under a dragged branch/tag
-  // chip spreads its siblings 50% apart as a live landing preview — the
-  // TARGET ITSELF STAYS PUT (a shifting drop zone would slide out from
-  // under the cursor and oscillate). All index→y math goes through rowTop
-  // so rows, edges, ghost, tether and previews agree. ---
+  // --- selection gap: while a row's action popup is up, that row gains
+  // breathing room on BOTH sides — 50% of a row height above and below —
+  // so the bar never covers the row ABOVE, which is exactly the move/drag
+  // target the selection exists to act on. The bar itself TUCKS INTO the
+  // selected row's top padding (6px in) so it reads attached. Drag-over
+  // does NOT shift layout (it flickered) — the drop row's node just fills
+  // solid. All index→y math goes through rowTop so rows, edges, ghost,
+  // tether and previews agree. ---
   const SEL_GAP = Math.round(ROW_H * 0.5)
   const popupActive =
     !!renderActions && selectedSha != null && detailsSha !== selectedSha && ordered.some((r) => r.sha === selectedSha)
   const selGapIdx = popupActive ? ordered.findIndex((r) => r.sha === selectedSha) : -1
-  const dragOverSha = useUiStore((s) => s.dragOverSha)
-  const dragOverIdx = dragOverSha ? ordered.findIndex((r) => r.sha === dragOverSha) : -1
-  const gapShift = (i: number): number => {
-    if (dragOverIdx >= 0) return i === dragOverIdx ? 0 : i > dragOverIdx ? SEL_GAP : -SEL_GAP
-    // selection: the row drops one gap, everything strictly below two
-    return selGapIdx < 0 || i < selGapIdx ? 0 : i === selGapIdx ? SEL_GAP : 2 * SEL_GAP
-  }
+  // the selected row itself drops one gap; everything strictly below drops
+  // two (the gap above it + the gap below it)
+  const gapShift = (i: number) => (selGapIdx < 0 || i < selGapIdx ? 0 : i === selGapIdx ? SEL_GAP : 2 * SEL_GAP)
   const rowTop = (i: number) => i * ROW_H + ghostOffset + gapShift(i)
   const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H : rowTop(ghostIdx - 1)
-  const contentH = totalRows * ROW_H + ghostOffset + (dragOverIdx >= 0 ? SEL_GAP : selGapIdx >= 0 ? 2 * SEL_GAP : 0)
+  const contentH = totalRows * ROW_H + ghostOffset + (selGapIdx >= 0 ? 2 * SEL_GAP : 0)
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
-  // extra window rows at the bottom when a gap shifts rows down out of
+  // extra window rows at the bottom when the gap shifts rows down out of
   // the uniform-height assumption
-  const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN + (dragOverIdx >= 0 || selGapIdx >= 0 ? 2 : 0))
+  const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN + (selGapIdx >= 0 ? 2 : 0))
 
   // tree layout centers the TRUNK itself (the checked-out branch's column),
   // not the whole lane band: merge-heavy repos accumulate hundreds of
@@ -300,7 +296,7 @@ export default function GraphView({
             </svg>
           </div>
         )}
-        <GraphEdges start={start} end={end} offset={ghostOffset} gapAfter={selGapIdx} dragIdx={dragOverIdx} gapSize={dragOverIdx >= 0 || selGapIdx >= 0 ? SEL_GAP : 0} dim={spotlight} originX={originX} />
+        <GraphEdges start={start} end={end} offset={ghostOffset} gapAfter={selGapIdx} gapSize={selGapIdx >= 0 ? SEL_GAP : 0} dim={spotlight} originX={originX} />
         {visibleRows.map((row, i) => {
           const idx = start + i
           const rowLane = laneLayout.lanes.get(row.sha) ?? 0
@@ -409,7 +405,7 @@ export default function GraphView({
             selectedRef={selectedRef}
             index={ordered.findIndex((r) => r.sha === selectedSha)}
             topOffset={ghostOffset}
-            gapAbove={gapShift(selGapIdx)}
+            gapAbove={selGapIdx >= 0 ? SEL_GAP : 0}
             laneCount={laneLayout.laneCount}
             originX={originX}
             scrollRef={scrollRef}

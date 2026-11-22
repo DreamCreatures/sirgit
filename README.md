@@ -4,7 +4,7 @@
 
 ## Why sirgit exists
 
-I've used ungit nearly every working day for more than ten years. It's where I learned that version control could be visual, immediate, and humane — and its core idea, *the commit graph as the primary surface you think on*, has stayed with me longer than any tool since. But ungit's development has quietly wound down to automated dependency bumps, and the parts I loved began to strain on today's larger repositories.
+I've used ungit nearly every working day for more than ten years. It's where I learned that version control could be visual, immediate, and humane — and its core idea, _the commit graph as the primary surface you think on_, has stayed with me longer than any tool since. But ungit's development has quietly wound down to automated dependency bumps, and the parts I loved began to strain on today's larger repositories.
 
 So rather than watch the idea age, I rebuilt it. Every line of sirgit is written fresh, but nearly every design decision traces back to a decade of living in ungit — this project stands on its shoulders.
 
@@ -41,20 +41,20 @@ sirgit                        # inside a project: opens that repo
 sirgit ~/Projects/ungit       # or point anywhere
 ```
 
-No node shim, no runtime dependencies — the npm package *is* the binary. Already running? A second `sirgit` just focuses the existing instance instead of erroring (port from `~/.sirgitrc.json`, default 8449).
+No node shim, no runtime dependencies — the npm package _is_ the binary. Already running? A second `sirgit` just focuses the existing instance instead of erroring (port from `~/.sirgitrc.json`, default 8449).
 
 ## Why a rewrite
 
 To be clear up front: none of this is a knock on ungit — it predates virtualized rendering, modern bundlers, and today's repository sizes, and it served a decade of my daily use without complaint. But its development has wound down to automated dependency bumps, and its 2013-era architecture (every loaded commit in the DOM, cumulative refetching on scroll) strains on large repos. The full reverse-engineering analysis lives in [`docs/recon.md`](docs/recon.md); the headline fixes:
 
-| ungit | sirgit |
-|---|---|
-| "Load more" **cumulatively re-fetches** the entire history window on every scroll | Disjoint windowed pages, merged client-side by sha — nothing is re-fetched |
-| Every loaded commit lives in the DOM forever | Virtualized: ~20–30 rows in the DOM regardless of history size (verified: 50k commits, flat DOM) |
-| `git log --numstat --show-signature` per page (GPG + per-commit diffs) | Lightweight topology pages; numstat/diffs fetched lazily per visible commit |
-| Every watcher event fetches **all remotes** → `index.lock` races patched over with retries | Fetch only on open/button/pull; per-repo single-writer operation queue makes races impossible |
-| Live updates = full re-fetch + full re-render | WebSocket events → **O(delta) graph sync** (`/api/log/delta` returns only new/removed commits) |
-| chokidar walks the entire worktree | `.git`-focused watcher + coalesced debounced events |
+| ungit                                                                                      | sirgit                                                                                           |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| "Load more" **cumulatively re-fetches** the entire history window on every scroll          | Disjoint windowed pages, merged client-side by sha — nothing is re-fetched                       |
+| Every loaded commit lives in the DOM forever                                               | Virtualized: ~20–30 rows in the DOM regardless of history size (verified: 50k commits, flat DOM) |
+| `git log --numstat --show-signature` per page (GPG + per-commit diffs)                     | Lightweight topology pages; numstat/diffs fetched lazily per visible commit                      |
+| Every watcher event fetches **all remotes** → `index.lock` races patched over with retries | Fetch only on open/button/pull; per-repo single-writer operation queue makes races impossible    |
+| Live updates = full re-fetch + full re-render                                              | WebSocket events → **O(delta) graph sync** (`/api/log/delta` returns only new/removed commits)   |
+| chokidar walks the entire worktree                                                         | `.git`-focused watcher + coalesced debounced events                                              |
 
 ## Architecture
 
@@ -113,7 +113,7 @@ Bump `version` in `package.json` (the single source — `scripts/prepare-bin.mjs
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-The `release` workflow (macOS arm64) does the rest: web build → cargo test → `pnpm pack` → `npm publish` → GitHub Release with `bin/sirgit` + the tarball attached. One-time setup: the `NPM_TOKEN` repo secret (an npm *Automation* token, which skips 2FA in CI). *(A release-please bot flow was tried and removed — this org's policy forbids workflow-created PRs.)*
+The `release` workflow (macOS arm64) does the rest: web build → cargo test → `pnpm pack` → `npm publish` → GitHub Release with `bin/sirgit` + the tarball attached. One-time setup: the `NPM_TOKEN` repo secret (an npm _Automation_ token, which skips 2FA in CI). _(A release-please bot flow was tried and removed — this org's policy forbids workflow-created PRs.)_
 
 ### Performance numbers (M1 acceptance)
 
