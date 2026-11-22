@@ -36,8 +36,10 @@ interface GraphRowProps {
   lane: number
   /** horizontal shift of the lane band (tree layout centers it in the viewport) */
   originX?: number
-  /** tree mode: which side of the trunk this row's node sits on → mirrored content */
-  mirrorSide?: 'left' | 'right'
+  /** which side of the node the TAG chips hug — the trunk-facing side (left mode: always left) */
+  tagSide?: 'left' | 'right'
+  /** tree mode: subject/meta ride with the tags on the trunk-facing side; left mode keeps the classic right flow */
+  msgWithTags?: boolean
   /** scroll-container width — anchors the mirrored blocks */
   graphW?: number
   refs?: RefInfo[]
@@ -92,7 +94,8 @@ function GraphRowInner({
   row,
   lane,
   originX = 0,
-  mirrorSide,
+  tagSide = 'left',
+  msgWithTags = false,
   graphW,
   refs,
   remoteTags,
@@ -126,10 +129,10 @@ function GraphRowInner({
       ? ' opacity-100 transition-opacity duration-100'
       : ' opacity-0 transition-opacity duration-100'
     : ''
-  // tree-mode mirror: side rows face the trunk — chips + action buttons sit
-  // in the corridor between the node and the trunk lane, subject/meta fan
-  // outward (away from the trunk), like a family tree's labels
-  const mirrored = mirrorSide != null && graphW != null ? mirrorSide : undefined
+  // family-tree labeling: [tag chips + message] hug the node on the
+  // TRUNK-FACING side; [branch chips + action buttons] take the away side —
+  // tree mode does this on every row (the trunk reads as a right-side row);
+  // left mode mirrors only the tags, branches + message keep the right flow
   // the working branch's tip (HEAD) reads at 50% bigger than branch nodes;
   // plain commits stay smallest
   const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
@@ -165,8 +168,10 @@ function GraphRowInner({
   for (const rf of chips) {
     if (rf.type !== 'tag' && !paired.has(rf.name)) ordered.push(rf)
   }
-  const shown = [...tags, ...ordered].slice(0, MAX_CHIPS)
-  const overflow = tags.length + ordered.length - shown.length
+  // +N expands the branch line inline (tags are never capped)
+  const [chipsExpanded, setChipsExpanded] = useState(false)
+  const shownBranches = chipsExpanded ? ordered : ordered.slice(0, MAX_CHIPS)
+  const overflow = ordered.length - shownBranches.length
   const [dragOver, setDragOver] = useState(false)
 
   // --- armed-ref action matrix (ungit's model: the subject is already picked,
@@ -232,7 +237,6 @@ function GraphRowInner({
       className={`group flex h-full items-center border-b border-zinc-900/80 pr-4 transition-all ${
         dimmed ? 'opacity-20' : ''
       } ${dragOver ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/50' : selected ? 'bg-zinc-800/60' : 'hover:bg-zinc-900/60'}`}
-      style={{ paddingLeft: mirrored ? 0 : x + r + 10 }}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragLeave={() => setDragOver(false)}
@@ -278,54 +282,86 @@ function GraphRowInner({
         </svg>
       </div>
 
-      {/* group 1 — chips + armed-row buttons. Default layout: display
-       * contents (children flow exactly as before). Tree-mirrored: anchored
-       * in the corridor between the node and the trunk — right-side rows
-       * right-align INTO the node (row-reverse, chips end up nearest), left-
-       * side rows flow out of the node toward the trunk. */}
+      {/* group A — tag chips + subject/meta, hugging the node on the
+       * TRUNK-FACING side ("text next to the tag" on commit hover). tree
+       * mode: the whole message block lives here; left mode: only the tags
+       * mirror to the node's left. row-reverse keeps the tag nearest the
+       * node on the left side, the message continuing away from it. */}
+      {(msgWithTags || tags.length > 0) && (
+        <div
+          className={`absolute inset-y-0 flex items-center gap-2${tagSide === 'left' ? ' flex-row-reverse' : ''}`}
+          style={
+            tagSide === 'left'
+              ? { left: 16, right: (graphW ?? 0) - (x - r - 10) }
+              : { left: x + r + 10, right: 16 }
+          }
+        >
+          {tags.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1" data-testid="row-tag-chips">
+              {tags.map((rf) => (
+                <Chip
+                  key={rf.name}
+                  icon={<Tag className="h-3 w-3" />}
+                  label={tagPushed(rf.name) ? `${tagPrefix}/${rf.name}` : rf.name}
+                  title={
+                    tagPushed(rf.name)
+                      ? `${rf.name} is on ${tagRemoteName ?? 'the remote'}`
+                      : onMoveTag
+                        ? `${rf.name} — drag onto a commit to move`
+                        : undefined
+                  }
+                  className={
+                    'bg-amber-400/10 text-amber-300 border-amber-400/30' +
+                    (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
+                  }
+                  onSelect={onSelect}
+                  sha={row.sha}
+                  refKind="tag"
+                  refName={rf.name}
+                  dragRef={onMoveTag && !tagPushed(rf.name) ? { kind: 'tag', name: rf.name } : undefined}
+                />
+              ))}
+            </div>
+          )}
+          {msgWithTags && (
+            <>
+              {/* subject — compact mode hides it except HEAD; the span stays
+                 in layout (flex-1) so the hover peek never reflows the row */}
+              <span
+                className={`min-w-0 flex-1 truncate text-sm text-zinc-200${subjectHide}${tagSide === 'left' ? ' text-right' : ''}`}
+              >
+                {row.subject}
+              </span>
+              <span className={`shrink-0 text-xs text-zinc-500${metaHide}`}>{row.author}</span>
+              <span className={`w-8 shrink-0 text-right text-xs tabular-nums text-zinc-500${metaHide}`}>
+                {relTime(row.commitDate)}
+              </span>
+              <span className={`w-[3.5rem] shrink-0 font-mono text-xs text-zinc-600 group-hover:text-zinc-400${metaHide}`}>
+                {row.sha.slice(0, 7)}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* group B — branch chips + armed-row action buttons on the AWAY side
+       * (left mode: the right-of-node flow carries the message too). Branch
+       * names hug their node; buttons trail outward. */}
       <div
-        className={
-          mirrored
-            ? `absolute inset-y-0 flex items-center${mirrored === 'right' ? ' flex-row-reverse' : ''}`
-            : ' contents'
-        }
+        className={`absolute inset-y-0 flex items-center gap-1.5${tagSide === 'right' ? ' flex-row-reverse' : ''}`}
         style={
-          mirrored === 'right'
-            ? { left: 0, right: (graphW ?? 0) - (x - r - 10) }
-            : mirrored === 'left'
-              ? { left: x + r + 10, right: 0 }
-              : undefined
+          tagSide === 'right'
+            ? { left: 16, right: (graphW ?? 0) - (x - r - 10) }
+            : { left: x + r + 10, right: 16 }
         }
       >
-      {/* ref chips, one line: [tags][branch + its remote twin][orphan remotes].
-       * Remote names abbreviate to 3 letters in LABELS ONLY (origin/main →
-       * ori/main) — selection, drags and git refspecs all keep the full name
-       * via refName. A pushed tag renders as <abbrev>/<tag> only. */}
-      <div className="mr-2 flex shrink-0 items-center gap-1" data-testid="row-chips">
-        {shown.map((rf) =>
-          rf.type === 'tag' ? (
-            <Chip
-              key={rf.name}
-              icon={<Tag className="h-3 w-3" />}
-              label={tagPushed(rf.name) ? `${tagPrefix}/${rf.name}` : rf.name}
-              title={
-                tagPushed(rf.name)
-                  ? `${rf.name} is on ${tagRemoteName ?? 'the remote'}`
-                  : onMoveTag
-                    ? `${rf.name} — drag onto a commit to move`
-                    : undefined
-              }
-              className={
-                'bg-amber-400/10 text-amber-300 border-amber-400/30' +
-                (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
-              }
-              onSelect={onSelect}
-              sha={row.sha}
-              refKind="tag"
-              refName={rf.name}
-              dragRef={onMoveTag && !tagPushed(rf.name) ? { kind: 'tag', name: rf.name } : undefined}
-            />
-          ) : rf.type === 'branch' ? (
+      {/* branch/remote chips, one line: [branch + its remote twin][orphan
+       * remotes] — tags sit on the node's other side now. Remote names
+       * abbreviate to 3 letters in LABELS ONLY (origin/main → ori/main) —
+       * selection, drags and git refspecs all keep the full name via refName. */}
+      <div className="flex shrink-0 items-center gap-1" data-testid="row-chips">
+        {shownBranches.map((rf) =>
+          rf.type === 'branch' ? (
             <Chip
               key={rf.name}
               icon={<GitBranch className="h-3 w-3" />}
@@ -360,9 +396,30 @@ function GraphRowInner({
           ),
         )}
         {overflow > 0 && (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+          <button
+            className="cursor-pointer rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+            onClick={(e) => {
+              e.stopPropagation()
+              setChipsExpanded(true)
+            }}
+            title={`Show ${overflow} more ref${overflow === 1 ? '' : 's'} on this commit`}
+            data-testid="chip-overflow"
+          >
             +{overflow}
-          </span>
+          </button>
+        )}
+        {chipsExpanded && ordered.length > MAX_CHIPS && (
+          <button
+            className="cursor-pointer rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+            onClick={(e) => {
+              e.stopPropagation()
+              setChipsExpanded(false)
+            }}
+            title="Collapse the extra refs"
+            data-testid="chip-collapse"
+          >
+            −
+          </button>
         )}
       </div>
 
@@ -372,7 +429,7 @@ function GraphRowInner({
        * the graph via [data-action-preview]. */}
       {showRebase && armed && (
         <button
-          className="mr-1 shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
+          className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
           title={`Rebase "${armed.name}" onto ${row.sha.slice(0, 7)} — its commits are replayed after this one. Conflicts pause in the staging area.`}
           onClick={(e) => {
             e.stopPropagation()
@@ -386,7 +443,7 @@ function GraphRowInner({
       )}
       {showSquash && armed && squashValid && (
         <button
-          className="mr-1 shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
+          className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
           title={
             armedIsCurrent
               ? `Squash "${armed.name}" down to ${row.sha.slice(0, 7)} — pick the commits, changes land staged`
@@ -404,7 +461,7 @@ function GraphRowInner({
       )}
       {showMove && armed && (
         <button
-          className="mr-2 shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-500/25"
+          className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-500/25"
           title={
             armed.remote
               ? `Push ${armed.name} to ${row.sha.slice(0, 7)} (moves the remote branch)`
@@ -428,7 +485,7 @@ function GraphRowInner({
       {mergeIntoBranch && onRowAction && armedBranch && !mergeNoop && (
         <>
           <button
-            className="mr-1 shrink-0 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-300 hover:bg-sky-500/25"
+            className="shrink-0 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-300 hover:bg-sky-500/25"
             title={
               mergeIntoBranch === currentBranch
                 ? `Merge "${armedBranch}" into "${mergeIntoBranch}" (fast-forward when possible; conflicts surface in the staging area)`
@@ -446,7 +503,7 @@ function GraphRowInner({
           </button>
           {squashMergePossible && (
             <button
-              className="mr-2 shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
+              className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
               title={`Squash-merge "${armedBranch}" into "${mergeIntoBranch}": stage all of its changes as one — no merge commit; you write the message`}
               onClick={(e) => {
                 e.stopPropagation()
@@ -461,39 +518,23 @@ function GraphRowInner({
           )}
         </>
       )}
-      </div>
 
-      {/* group 2 — subject + meta. Default: display contents. Tree-mirrored:
-       * anchored on the OUTWARD side of the node (away from the trunk);
-       * left-side rows right-align so the text hugs the node. */}
-      <div
-        className={
-          mirrored
-            ? `absolute inset-y-0 flex items-center${mirrored === 'left' ? ' justify-end' : ''}`
-            : ' contents'
-        }
-        style={
-          mirrored === 'right'
-            ? { left: x + r + 10, right: 16 }
-            : mirrored === 'left'
-              ? { left: 16, right: (graphW ?? 0) - (x - r - 10) }
-              : undefined
-        }
-      >
-      {/* subject — compact mode hides it except on HEAD; the span stays in
-       * layout (flex-1) so toggling never reflows the row, hover reveals */}
-      <span
-        className={`min-w-0 flex-1 truncate text-sm text-zinc-200${subjectHide}${mirrored === 'left' ? ' text-right' : ''}`}
-      >
-        {row.subject}
-      </span>
+      {/* left mode: the subject + meta ride in this right-of-node flow
+       * (tree mode renders them in group A, next to the tags) */}
+      {!msgWithTags && (
+        <>
+          {/* subject — compact mode hides it except HEAD; the span stays in
+           * layout (flex-1) so toggling never reflows the row, hover reveals */}
+          <span className={`min-w-0 flex-1 truncate text-sm text-zinc-200${subjectHide}`}>{row.subject}</span>
 
-      {/* meta — compact mode fades these too; hover peeks */}
-      <span className={`ml-3 shrink-0 text-xs text-zinc-500${metaHide}`}>{row.author}</span>
-      <span className={`ml-2 w-8 shrink-0 text-right text-xs tabular-nums text-zinc-500${metaHide}`}>{relTime(row.commitDate)}</span>
-      <span className={`ml-2 w-[3.5rem] shrink-0 font-mono text-xs text-zinc-600 group-hover:text-zinc-400${metaHide}`}>
-        {row.sha.slice(0, 7)}
-      </span>
+          {/* meta — compact mode fades these too; hover peeks */}
+          <span className={`shrink-0 text-xs text-zinc-500${metaHide}`}>{row.author}</span>
+          <span className={`w-8 shrink-0 text-right text-xs tabular-nums text-zinc-500${metaHide}`}>{relTime(row.commitDate)}</span>
+          <span className={`w-[3.5rem] shrink-0 font-mono text-xs text-zinc-600 group-hover:text-zinc-400${metaHide}`}>
+            {row.sha.slice(0, 7)}
+          </span>
+        </>
+      )}
       </div>
     </div>
   )

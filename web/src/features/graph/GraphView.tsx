@@ -285,13 +285,12 @@ export default function GraphView({
               topOffset={ghostOffset}
               lane={rowLane}
               originX={originX}
-              mirrorSide={
-                laneMode === 'tree' && trunkLane != null && rowLane !== trunkLane
-                  ? rowLane > trunkLane
-                    ? 'right'
-                    : 'left'
-                  : undefined
+              tagSide={
+                laneMode === 'tree' && trunkLane != null && rowLane < trunkLane
+                  ? 'right'
+                  : 'left'
               }
+              msgWithTags={laneMode === 'tree' && trunkLane != null}
               graphW={viewportW}
               refs={refBySha.get(row.sha)}
               remoteTags={remoteTags}
@@ -424,7 +423,8 @@ const RowWrapper = memo(function RowWrapper({
   topOffset,
   lane,
   originX,
-  mirrorSide,
+  tagSide,
+  msgWithTags,
   graphW,
   refs,
   remoteTags,
@@ -448,8 +448,10 @@ const RowWrapper = memo(function RowWrapper({
   lane: number
   /** lane-band centering shift (tree layout) */
   originX: number
-  /** tree mode: which side of the trunk this row's node sits on (mirrored content) */
-  mirrorSide?: 'left' | 'right'
+  /** which side of the node the tag chips (+ tree-mode message) hug — the trunk-facing side */
+  tagSide?: 'left' | 'right'
+  /** tree mode: subject/meta ride with the tags on the trunk-facing side */
+  msgWithTags?: boolean
   /** scroll-container width — anchors the mirrored blocks */
   graphW?: number
   refs?: RefInfo[]
@@ -478,7 +480,8 @@ const RowWrapper = memo(function RowWrapper({
         row={row}
         lane={lane}
         originX={originX}
-        mirrorSide={mirrorSide}
+        tagSide={tagSide}
+        msgWithTags={msgWithTags}
         graphW={graphW}
         refs={refs}
         remoteTags={remoteTags}
