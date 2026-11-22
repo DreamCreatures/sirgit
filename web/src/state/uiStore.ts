@@ -186,10 +186,22 @@ const REPOS_KEY = 'sirgit.repos'
 
 function loadRepos(): string[] {
   try {
-    return JSON.parse(localStorage.getItem(REPOS_KEY) ?? '[]') as string[]
+    const raw = JSON.parse(localStorage.getItem(REPOS_KEY) ?? '[]') as string[]
+    // normalize + dedupe (self-heals pre-fix entries like "/a/b/" vs "/a/b")
+    const out: string[] = []
+    for (const r of raw) {
+      const n = normPath(r)
+      if (!out.includes(n)) out.push(n)
+    }
+    return out
   } catch {
     return []
   }
+}
+
+/** trailing slashes off ("/a/b/" === "/a/b"; "/" stays "/") */
+function normPath(p: string): string {
+  return p.replace(/\/+$/, '') || '/'
 }
 
 function loadNum(key: string, fallback: number): number {
@@ -304,8 +316,9 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   recentRepos: loadRecents(),
   addRecentRepo(path) {
-    // top-10 cap (user rule) — recency order, deduped
-    const next = [path, ...get().recentRepos.filter((r) => r !== path)].slice(0, 10)
+    // top-10 cap (user rule) — recency order, deduped, slash-normalized
+    const p = normPath(path)
+    const next = [p, ...get().recentRepos.filter((r) => r !== p)].slice(0, 10)
     localStorage.setItem(RECENTS_KEY, JSON.stringify(next))
     set({ recentRepos: next })
   },
@@ -322,7 +335,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   repos: loadRepos(),
   addRepos(paths) {
     const cur = get().repos
-    const next = [...paths.filter((p) => !cur.includes(p)), ...cur].slice(0, 200)
+    const next = [...paths.map(normPath).filter((p) => !cur.includes(p)), ...cur].slice(0, 200)
     localStorage.setItem(REPOS_KEY, JSON.stringify(next))
     set({ repos: next })
   },
