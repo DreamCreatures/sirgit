@@ -127,10 +127,14 @@ export default function GraphView({
   // tree layout: center the lane band when the viewport has spare width (e.g.
   // collapsed refs panel) — the trunk already sits mid-band thanks to the
   // alternating lane assignment, so the checked-out branch lands near the
-  // viewport middle instead of hugging the left edge. Narrow viewport → 0 →
-  // left-anchored exactly as before.
-  const bandW = laneX(laneLayout.laneCount) + 20
-  const originX = Math.max(0, Math.floor((viewportW - bandW) / 2))
+  // viewport middle instead of hugging the left edge. The band spans the
+  // OUTERMOST NODE EDGES (± the biggest node radius, HEAD's 15), not lane
+  // centers, so centering is exact. Narrow viewport → 0 → left-anchored
+  // exactly as before.
+  const minEdge = LANE_GUTTER + LANE_W / 2 - 15
+  const maxEdge = laneX(laneLayout.laneCount - 1) + 15
+  const bandW = maxEdge - minEdge
+  const originX = Math.max(0, Math.floor((viewportW - bandW) / 2) - minEdge)
 
   // --- hover preview of a row action (ungit-style): the commit run between
   // the armed subject's tip and the hovered target (first-parent walk, the
