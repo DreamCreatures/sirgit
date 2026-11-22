@@ -384,6 +384,7 @@ export default function GraphView({
           <ActionPopup
             key={selectedSha}
             sha={selectedSha}
+            selectedRef={selectedRef}
             index={ordered.findIndex((r) => r.sha === selectedSha)}
             topOffset={ghostOffset}
             laneCount={laneLayout.laneCount}
@@ -692,6 +693,7 @@ function PreviewOverlay({
  */
 function ActionPopup({
   sha,
+  selectedRef,
   index,
   topOffset,
   laneCount,
@@ -702,6 +704,8 @@ function ActionPopup({
   children,
 }: {
   sha: string
+  /** the picked ref (chip click) — the bar anchors next to THAT chip; null = node pick */
+  selectedRef?: { kind: 'branch' | 'tag' | 'remote-branch'; name: string } | null
   index: number
   /** the ghost next-commit row shifts row positions down */
   topOffset: number
@@ -749,16 +753,20 @@ function ActionPopup({
   let top = rowCenterY - popupH / 2
   top = Math.min(Math.max(top, rect.top + 4), rect.bottom - popupH - 4)
 
-  // horizontal: just right of the selected branch chip; when that would
-  // overflow the container, overlay the branch name; last resort = node side
+  // horizontal: sibling spacing right of the SELECTED chip — a tag pick
+  // anchors beside the tag (even on the node's far side), a branch pick
+  // beside its chip; a plain node pick (no ref) anchors after the row's
+  // last chip; overflow overlays the anchor chip, last resort = node side
   const laneXBased = rect.left + originX + Math.max(60, laneX(Math.min(laneCount, 6)) + 8)
   const rowEl = container.querySelector(`[data-sha="${sha}"]`)
-  const chips = rowEl ? [...rowEl.querySelectorAll('[data-testid="graph-ref-chip"]')] : []
-  const lastChip = chips.length ? chips[chips.length - 1].getBoundingClientRect() : null
-  let left = lastChip ? lastChip.right + 8 : laneXBased
+  const anchorEl = (
+    (selectedRef && rowEl?.querySelector(`[data-ref="${selectedRef.kind}:${selectedRef.name}"]`)) ||
+    (rowEl ? ([...rowEl.querySelectorAll('[data-testid="graph-ref-chip"]')].pop() as HTMLElement | undefined) : undefined)
+  )?.getBoundingClientRect?.() ?? null
+  let left = anchorEl ? anchorEl.right + 8 : laneXBased
   let maxW = rect.right - left - 8
-  if (maxW < 300 && lastChip) {
-    left = lastChip.left
+  if (maxW < 300 && anchorEl) {
+    left = anchorEl.left
     maxW = rect.right - left - 8
   }
   if (maxW < 220) {

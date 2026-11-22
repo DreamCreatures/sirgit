@@ -590,6 +590,7 @@ function Chip({
         onCheckout?.()
       }}
       data-testid="graph-ref-chip"
+      data-ref={`${refKind}:${refName}`}
     >
       {icon}
       <span className="truncate">{label}</span>
