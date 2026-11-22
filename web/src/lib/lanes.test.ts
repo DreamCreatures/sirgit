@@ -31,12 +31,12 @@ describe('assignLanes (branch chains)', () => {
       ],
       't3',
     )
-    expect(laneCount).toBe(3)
-    expect(lanes.get('t1')).toBe(1)
-    expect(lanes.get('t2')).toBe(1)
-    expect(lanes.get('t3')).toBe(1) // trunk holds the middle slot
-    expect(lanes.get('a1')).toBe(2) // first side branch fans right
-    expect(lanes.get('b1')).toBe(0) // second fans left
+    expect(laneCount).toBe(5)
+    expect(lanes.get('t1')).toBe(2)
+    expect(lanes.get('t2')).toBe(2)
+    expect(lanes.get('t3')).toBe(2) // trunk holds the middle slot
+    expect(lanes.get('a1')).toBe(4) // first side branch fans right, double-spaced (+2)
+    expect(lanes.get('b1')).toBe(0) // second fans left (−2)
     expect(lanes.get('b2')).toBe(0)
   })
 
@@ -53,12 +53,12 @@ describe('assignLanes (branch chains)', () => {
       ],
       't1',
     )
-    expect(laneCount).toBe(5)
-    expect(lanes.get('t1')).toBe(2) // middle of 5
-    expect(lanes.get('c1')).toBe(3) // +1
-    expect(lanes.get('c2')).toBe(1) // −1
-    expect(lanes.get('c3')).toBe(4) // +2
-    expect(lanes.get('c4')).toBe(0) // −2
+    expect(laneCount).toBe(7)
+    expect(lanes.get('t1')).toBe(3) // middle slot
+    expect(lanes.get('c1')).toBe(5) // +2
+    expect(lanes.get('c2')).toBe(1) // −2
+    expect(lanes.get('c3')).toBe(6) // +3
+    expect(lanes.get('c4')).toBe(0) // −3
   })
 
   it('keeps a single-branch history in one lane', () => {

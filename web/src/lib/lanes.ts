@@ -189,17 +189,19 @@ function assignLanesChains(
     return { lanes, laneCount: Math.max(1, lane) }
   }
 
-  // tree layout: trunk = offset 0; side chains ALTERNATE sides around it
-  // (1st → +1, 2nd → −1, 3rd → +2, 4th → −2, …, newest tips closest), then
-  // the signed offsets normalize to plain 0..laneCount−1 slots with the trunk
-  // in the middle — consumers never see a negative lane. Appending older
-  // pages only ever adds chains at the fan's outer edge, so existing columns
-  // keep their slots (the whole band shifts at most one lane right).
+  // tree layout: trunk = offset 0; side chains ALTERNATE sides around it,
+  // with the FIRST ring double-spaced (1st → +2, 2nd → −2, 3rd → +3, 4th →
+  // −3, …) — one lane of breathing room between the trunk and its nearest
+  // siblings, whose chips face the trunk (mirrored rows). Offsets then
+  // normalize to plain 0..laneCount−1 slots with the trunk in the middle —
+  // consumers never see a negative lane. Appending older pages only ever
+  // adds chains at the fan's outer edge, so existing columns keep their
+  // slots (the whole band shifts at most one lane right).
   let sideIndex = 0
   const offsets = chains.map((chain) => {
     if (chain.trunk) return 0
     sideIndex++
-    return sideIndex % 2 === 1 ? (sideIndex + 1) / 2 : -sideIndex / 2
+    return sideIndex % 2 === 1 ? (sideIndex + 1) / 2 + 1 : -(sideIndex / 2 + 1)
   })
   let min = 0
   let max = 0

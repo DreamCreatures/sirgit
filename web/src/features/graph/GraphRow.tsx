@@ -36,6 +36,10 @@ interface GraphRowProps {
   lane: number
   /** horizontal shift of the lane band (tree layout centers it in the viewport) */
   originX?: number
+  /** tree mode: which side of the trunk this row's node sits on → mirrored content */
+  mirrorSide?: 'left' | 'right'
+  /** scroll-container width — anchors the mirrored blocks */
+  graphW?: number
   refs?: RefInfo[]
   /** tag names known to be on the remote — pushed tags render as <remote-abbrev>/<tag> */
   remoteTags?: string[]
@@ -88,6 +92,8 @@ function GraphRowInner({
   row,
   lane,
   originX = 0,
+  mirrorSide,
+  graphW,
   refs,
   remoteTags,
   remoteTagRemote,
@@ -107,6 +113,14 @@ function GraphRowInner({
   const x = originX + laneX(lane)
   // compact mode fades every subject except HEAD's; the row hover peeks at it
   const subjectCompact = useUiStore((s) => s.subjectCompact)
+  // compact mode also fades the author/time/sha meta on every row (subject
+  // keeps the HEAD exception — it anchors the view)
+  const metaHide = subjectCompact ? ' opacity-0 transition-opacity duration-100 group-hover:opacity-100' : ''
+  const subjectHide = subjectCompact && !isHead ? ' opacity-0 transition-opacity duration-100 group-hover:opacity-100' : ''
+  // tree-mode mirror: side rows face the trunk — chips + action buttons sit
+  // in the corridor between the node and the trunk lane, subject/meta fan
+  // outward (away from the trunk), like a family tree's labels
+  const mirrored = mirrorSide != null && graphW != null ? mirrorSide : undefined
   // the working branch's tip (HEAD) reads at 50% bigger than branch nodes;
   // plain commits stay smallest
   const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
@@ -209,7 +223,7 @@ function GraphRowInner({
       className={`group flex h-full items-center border-b border-zinc-900/80 pr-4 transition-all ${
         dimmed ? 'opacity-20' : ''
       } ${dragOver ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/50' : selected ? 'bg-zinc-800/60' : 'hover:bg-zinc-900/60'}`}
-      style={{ paddingLeft: x + r + 10 }}
+      style={{ paddingLeft: mirrored ? 0 : x + r + 10 }}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragLeave={() => setDragOver(false)}
@@ -253,6 +267,25 @@ function GraphRowInner({
         </svg>
       </div>
 
+      {/* group 1 — chips + armed-row buttons. Default layout: display
+       * contents (children flow exactly as before). Tree-mirrored: anchored
+       * in the corridor between the node and the trunk — right-side rows
+       * right-align INTO the node (row-reverse, chips end up nearest), left-
+       * side rows flow out of the node toward the trunk. */}
+      <div
+        className={
+          mirrored
+            ? `absolute inset-y-0 flex items-center${mirrored === 'right' ? ' flex-row-reverse' : ''}`
+            : ' contents'
+        }
+        style={
+          mirrored === 'right'
+            ? { left: 0, right: (graphW ?? 0) - (x - r - 10) }
+            : mirrored === 'left'
+              ? { left: x + r + 10, right: 0 }
+              : undefined
+        }
+      >
       {/* ref chips, one line: [tags][branch + its remote twin][orphan remotes].
        * Remote names abbreviate to 3 letters in LABELS ONLY (origin/main →
        * ori/main) — selection, drags and git refspecs all keep the full name
@@ -417,23 +450,40 @@ function GraphRowInner({
           )}
         </>
       )}
+      </div>
 
+      {/* group 2 — subject + meta. Default: display contents. Tree-mirrored:
+       * anchored on the OUTWARD side of the node (away from the trunk);
+       * left-side rows right-align so the text hugs the node. */}
+      <div
+        className={
+          mirrored
+            ? `absolute inset-y-0 flex items-center${mirrored === 'left' ? ' justify-end' : ''}`
+            : ' contents'
+        }
+        style={
+          mirrored === 'right'
+            ? { left: x + r + 10, right: 16 }
+            : mirrored === 'left'
+              ? { left: 16, right: (graphW ?? 0) - (x - r - 10) }
+              : undefined
+        }
+      >
       {/* subject — compact mode hides it except on HEAD; the span stays in
        * layout (flex-1) so toggling never reflows the row, hover reveals */}
       <span
-        className={`min-w-0 flex-1 truncate text-sm text-zinc-200${
-          subjectCompact && !isHead ? ' opacity-0 transition-opacity duration-100 group-hover:opacity-100' : ''
-        }`}
+        className={`min-w-0 flex-1 truncate text-sm text-zinc-200${subjectHide}${mirrored === 'left' ? ' text-right' : ''}`}
       >
         {row.subject}
       </span>
 
-      {/* meta */}
-      <span className="ml-3 shrink-0 text-xs text-zinc-500">{row.author}</span>
-      <span className="ml-2 w-8 shrink-0 text-right text-xs tabular-nums text-zinc-500">{relTime(row.commitDate)}</span>
-      <span className="ml-2 w-[3.5rem] shrink-0 font-mono text-xs text-zinc-600 group-hover:text-zinc-400">
+      {/* meta — compact mode fades these too; hover peeks */}
+      <span className={`ml-3 shrink-0 text-xs text-zinc-500${metaHide}`}>{row.author}</span>
+      <span className={`ml-2 w-8 shrink-0 text-right text-xs tabular-nums text-zinc-500${metaHide}`}>{relTime(row.commitDate)}</span>
+      <span className={`ml-2 w-[3.5rem] shrink-0 font-mono text-xs text-zinc-600 group-hover:text-zinc-400${metaHide}`}>
         {row.sha.slice(0, 7)}
       </span>
+      </div>
     </div>
   )
 }

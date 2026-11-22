@@ -158,6 +158,7 @@ export default function GraphView({
   // commit is pending (staged / in-flight), subtle when clean. ---
   const headIdx = headSha ? ordered.findIndex((r) => r.sha === headSha) : -1
   const headLane = headIdx >= 0 && headSha ? (laneLayout.lanes.get(headSha) ?? -1) : -1
+  const trunkLane = headIdx >= 0 && headLane >= 0 ? headLane : undefined
   const showTether = headIdx >= 0 && headLane >= 0 && !ghostSha
   const headCenterY = headIdx * ROW_H + ghostOffset + ROW_H / 2
   const tetherCx = originX + laneX(headLane)
@@ -286,14 +287,23 @@ export default function GraphView({
         <GraphEdges start={start} end={end} offset={ghostOffset} dim={spotlight} originX={originX} />
         {visibleRows.map((row, i) => {
           const idx = start + i
+          const rowLane = laneLayout.lanes.get(row.sha) ?? 0
           return (
             <RowWrapper
               key={row.sha}
               row={row}
               index={idx}
               topOffset={ghostOffset}
-              lane={laneLayout.lanes.get(row.sha) ?? 0}
+              lane={rowLane}
               originX={originX}
+              mirrorSide={
+                laneMode === 'tree' && trunkLane != null && rowLane !== trunkLane
+                  ? rowLane > trunkLane
+                    ? 'right'
+                    : 'left'
+                  : undefined
+              }
+              graphW={viewportW}
               refs={refBySha.get(row.sha)}
               remoteTags={remoteTags}
               remoteTagRemote={remoteTagRemote}
@@ -365,13 +375,15 @@ export default function GraphView({
               data-testid="head-tether-button"
             />
             {headAboveViewport && tetherRows > 0 && (
-              <span
-                className="absolute rounded-full border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-400"
-                style={{ left: tetherCx + 14, top: 16 }}
+              <button
+                className="absolute cursor-pointer rounded-full border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                style={{ left: tetherCx + 14, top: 16, pointerEvents: 'auto' }}
+                title={`Jump to HEAD (${currentBranch ?? 'HEAD'} @ ${headSha!.slice(0, 7)})`}
+                onClick={() => useUiStore.getState().requestScrollTo(headSha!)}
                 data-testid="head-tether-badge"
               >
                 ↑{tetherRows}
-              </span>
+              </button>
             )}
           </div>
         )}
@@ -423,6 +435,8 @@ const RowWrapper = memo(function RowWrapper({
   topOffset,
   lane,
   originX,
+  mirrorSide,
+  graphW,
   refs,
   remoteTags,
   remoteTagRemote,
@@ -445,6 +459,10 @@ const RowWrapper = memo(function RowWrapper({
   lane: number
   /** lane-band centering shift (tree layout) */
   originX: number
+  /** tree mode: which side of the trunk this row's node sits on (mirrored content) */
+  mirrorSide?: 'left' | 'right'
+  /** scroll-container width — anchors the mirrored blocks */
+  graphW?: number
   refs?: RefInfo[]
   remoteTags?: string[]
   remoteTagRemote?: string | null
@@ -471,6 +489,8 @@ const RowWrapper = memo(function RowWrapper({
         row={row}
         lane={lane}
         originX={originX}
+        mirrorSide={mirrorSide}
+        graphW={graphW}
         refs={refs}
         remoteTags={remoteTags}
         remoteTagRemote={remoteTagRemote}
