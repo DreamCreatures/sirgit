@@ -239,9 +239,13 @@ function GraphRowInner({
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     setDragOver(true)
+    // lift the drop target to the store — the view spreads this row's
+    // siblings 50% apart (live landing preview, same shape as a selection)
+    useUiStore.getState().setDragOverSha(row.sha)
   }
   const onDrop = (e: DragEvent) => {
     setDragOver(false)
+    useUiStore.getState().setDragOverSha(null)
     if (!onMoveBranch && !onMoveTag) return
     const raw = e.dataTransfer.getData(DRAG_TYPE)
     if (!raw) return
@@ -263,7 +267,10 @@ function GraphRowInner({
       } ${dragOver ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/50' : selected ? 'bg-zinc-800/60' : 'hover:bg-zinc-900/60'}`}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      onDragLeave={() => setDragOver(false)}
+      onDragLeave={() => {
+        setDragOver(false)
+        useUiStore.getState().setDragOverSha(null)
+      }}
       onMouseLeave={() => setActionsVisible(false)}
     >
       {/* lane node — outlined circle in the lane color; solid when selected;
@@ -614,6 +621,8 @@ function Chip({
         e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ kind: dragRef.kind, name: dragRef.name, tipSha: sha }))
         e.dataTransfer.effectAllowed = 'move'
       }}
+      // a drag cancelled without a drop (Esc) must not leave a spread open
+      onDragEnd={() => useUiStore.getState().setDragOverSha(null)}
       className={`inline-flex max-w-44 items-center gap-1 truncate rounded-md border px-1.5 py-0.5 text-[11px] hover:brightness-125 ${
         dragRef ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${className}`}

@@ -141,6 +141,15 @@ interface UiState {
   setDetailsSha(sha: string | null): void
 
   /**
+   * Drag-and-drop move: the commit row currently under the dragged
+   * branch/tag chip — drives the drop highlight and the 50% sibling spread
+   * (live preview of where the chip lands). Transient, cleared on
+   * drop/leave/drag-end.
+   */
+  dragOverSha: string | null
+  setDragOverSha(sha: string | null): void
+
+  /**
    * One-shot seed for the home page's Open input — set by the repo page's
    * back arrow to the previous repo's PARENT directory (with trailing slash,
    * so the sibling autocomplete opens ready). Consumed on HomePage mount.
@@ -308,6 +317,9 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   detailsSha: null,
   setDetailsSha: (sha) => set({ detailsSha: sha }),
+
+  dragOverSha: null,
+  setDragOverSha: (sha) => set({ dragOverSha: sha }),
 
   backSeedPath: null,
   setBackSeedPath: (v) => set({ backSeedPath: v }),
