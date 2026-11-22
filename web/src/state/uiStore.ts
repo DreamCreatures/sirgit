@@ -193,6 +193,9 @@ function loadRepos(): string[] {
       const n = normPath(r)
       if (!out.includes(n)) out.push(n)
     }
+    // write the healed list back so duplicates don't linger until the next
+    // store mutation
+    if (out.length !== raw.length) localStorage.setItem(REPOS_KEY, JSON.stringify(out))
     return out
   } catch {
     return []
@@ -211,7 +214,14 @@ function loadNum(key: string, fallback: number): number {
 
 function loadRecents(): string[] {
   try {
-    return JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]') as string[]
+    const raw = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]') as string[]
+    const out: string[] = []
+    for (const r of raw) {
+      const n = normPath(r)
+      if (!out.includes(n)) out.push(n)
+    }
+    if (out.length !== raw.length) localStorage.setItem(RECENTS_KEY, JSON.stringify(out))
+    return out
   } catch {
     return []
   }
