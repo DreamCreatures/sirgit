@@ -186,6 +186,13 @@ pub struct MoveBranchParams {
 }
 
 #[derive(Deserialize)]
+pub struct MoveTagParams {
+    pub path: String,
+    pub tag: String,
+    pub target: String,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeBranchParams {
     pub path: String,
@@ -343,6 +350,13 @@ pub async fn move_branch(State(app): State<Arc<AppState>>, Json(p): Json<MoveBra
     let (_st, _g) = locked(&app, &p.path).await?;
     ops::move_branch(&p.path, &p.branch, &p.target).await.map_err(ApiError::Git)?;
     _st.bump(&["refs", "index", "worktree"]);
+    Ok(ok_json())
+}
+
+pub async fn move_tag(State(app): State<Arc<AppState>>, Json(p): Json<MoveTagParams>) -> ApiResult<Json<serde_json::Value>> {
+    let (_st, _g) = locked(&app, &p.path).await?;
+    ops::move_tag(&p.path, &p.tag, &p.target).await.map_err(ApiError::Git)?;
+    _st.bump(&["refs"]);
     Ok(ok_json())
 }
 

@@ -60,6 +60,8 @@ interface GraphRowProps {
   dimmed?: boolean
   /** drag a local branch chip onto this row → move the branch here */
   onMoveBranch?: (branch: string, targetSha: string) => void
+  /** drag a LOCAL tag chip onto this row → move the tag here (pushed tags are not draggable) */
+  onMoveTag?: (tag: string, targetSha: string) => void
 }
 
 const MAX_CHIPS = 4 // [tag][branch][ori/twin][branch] fits before the +N chip
@@ -95,6 +97,7 @@ function GraphRowInner({
   onRowAction,
   dimmed,
   onMoveBranch,
+  onMoveTag,
 }: GraphRowProps) {
   const color = laneColor(lane)
   const x = laneX(lane)
@@ -174,20 +177,22 @@ function GraphRowInner({
   const squashValid = !armed || containsCommit(armed.tipSha, row.sha)
 
   const onDragOver = (e: DragEvent) => {
-    if (!onMoveBranch || !e.dataTransfer.types.includes(DRAG_TYPE)) return
+    if ((!onMoveBranch && !onMoveTag) || !e.dataTransfer.types.includes(DRAG_TYPE)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     setDragOver(true)
   }
   const onDrop = (e: DragEvent) => {
     setDragOver(false)
-    if (!onMoveBranch) return
+    if (!onMoveBranch && !onMoveTag) return
     const raw = e.dataTransfer.getData(DRAG_TYPE)
     if (!raw) return
     e.preventDefault()
     try {
-      const { branch, tipSha } = JSON.parse(raw) as { branch: string; tipSha?: string }
-      if (branch && tipSha !== row.sha) onMoveBranch(branch, row.sha)
+      const { kind, name, tipSha } = JSON.parse(raw) as { kind: 'branch' | 'tag'; name: string; tipSha?: string }
+      if (!name || tipSha === row.sha) return
+      if (kind === 'tag') onMoveTag?.(name, row.sha)
+      else onMoveBranch?.(name, row.sha)
     } catch {
       /* malformed payload — ignore */
     }
@@ -253,7 +258,13 @@ function GraphRowInner({
               key={rf.name}
               icon={<Tag className="h-3 w-3" />}
               label={tagPushed(rf.name) ? `${tagPrefix}/${rf.name}` : rf.name}
-              title={tagPushed(rf.name) ? `${rf.name} is on ${tagRemoteName ?? 'the remote'}` : undefined}
+              title={
+                tagPushed(rf.name)
+                  ? `${rf.name} is on ${tagRemoteName ?? 'the remote'}`
+                  : onMoveTag
+                    ? `${rf.name} — drag onto a commit to move`
+                    : undefined
+              }
               className={
                 'bg-amber-400/10 text-amber-300 border-amber-400/30' +
                 (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
@@ -262,6 +273,7 @@ function GraphRowInner({
               sha={row.sha}
               refKind="tag"
               refName={rf.name}
+              dragRef={onMoveTag && !tagPushed(rf.name) ? { kind: 'tag', name: rf.name } : undefined}
             />
           ) : rf.type === 'branch' ? (
             <Chip
@@ -276,7 +288,7 @@ function GraphRowInner({
               sha={row.sha}
               refKind="branch"
               refName={rf.name}
-              dragBranch={onMoveBranch ? rf.name : undefined}
+              dragRef={onMoveBranch ? { kind: 'branch', name: rf.name } : undefined}
               onCheckout={onCheckout && rf.name !== currentBranch ? () => onCheckout(rf.name) : undefined}
             />
           ) : (
@@ -420,7 +432,7 @@ function Chip({
   sha,
   refKind,
   refName,
-  dragBranch,
+  dragRef,
   onCheckout,
   title,
 }: {
@@ -433,8 +445,8 @@ function Chip({
   refKind: 'branch' | 'tag' | 'remote-branch'
   /** raw ref name (label may carry the (HEAD) suffix or the abbreviated remote) */
   refName: string
-  /** set → the chip is a local branch and can be dragged onto another row to move it */
-  dragBranch?: string
+  /** set → the chip is draggable onto another row to move that branch/tag */
+  dragRef?: { kind: 'branch' | 'tag'; name: string }
   /** set → double-click checks this branch out (non-current local branches) */
   onCheckout?: () => void
   /** optional hover tooltip */
@@ -443,14 +455,14 @@ function Chip({
   return (
     <button
       type="button"
-      draggable={!!dragBranch}
+      draggable={!!dragRef}
       onDragStart={(e) => {
-        if (!dragBranch) return
-        e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ branch: dragBranch, tipSha: sha }))
+        if (!dragRef) return
+        e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ kind: dragRef.kind, name: dragRef.name, tipSha: sha }))
         e.dataTransfer.effectAllowed = 'move'
       }}
       className={`inline-flex max-w-44 items-center gap-1 truncate rounded-md border px-1.5 py-0.5 text-[11px] hover:brightness-125 ${
-        dragBranch ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+        dragRef ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
       } ${className}`}
       title={title ?? (onCheckout ? `${label} — double-click to check out` : label)}
       onClick={(e) => {

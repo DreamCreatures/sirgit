@@ -497,6 +497,58 @@ pub async fn push(repo: &str, remote: &str, refspec: &str, force: bool, extra: &
     Ok(())
 }
 
+/// Move a tag onto another commit. An ANNOTATED tag keeps its message: the
+/// old tag object's contents are re-fed via `tag -f -a -F -` (a plain
+/// `update-ref` would silently flatten it to a lightweight tag — the
+/// annotation, message and tagger would be gone). Local-only by design:
+/// tags on the remote are published releases and the UI refuses to drag
+/// them; this op never touches the remote.
+pub async fn move_tag(repo: &str, tag: &str, target: &str) -> Result<(), super::errors::GitError> {
+    let w = repo_or_err(repo)?;
+    let kind = run_git(
+        &w,
+        &["cat-file".to_string(), "-t".to_string(), format!("refs/tags/{}", tag)],
+        GitKind::ReadOnly,
+    )
+    .await?;
+    if kind.stdout.trim() == "tag" {
+        let msg = run_git(
+            &w,
+            &[
+                "for-each-ref".to_string(),
+                "--format=%(contents)".to_string(),
+                format!("refs/tags/{}", tag),
+            ],
+            GitKind::ReadOnly,
+        )
+        .await?;
+        run_git_with_stdin(
+            &w,
+            &[
+                "tag".to_string(),
+                "-f".to_string(),
+                "-a".to_string(),
+                tag.to_string(),
+                "-F".to_string(),
+                "-".to_string(),
+                target.to_string(),
+            ],
+            msg.stdout.as_str(),
+            GitKind::Mutation,
+        )
+        .await
+        .map(|_| ())
+    } else {
+        run_git(
+            &w,
+            &["update-ref".to_string(), format!("refs/tags/{}", tag), target.to_string()],
+            GitKind::Mutation,
+        )
+        .await
+        .map(|_| ())
+    }
+}
+
 /// Pull = fetch + fast-forward-only merge of the current branch's upstream.
 /// Pull = fetch + fast-forward the target branch to its upstream.
 /// - Current branch: fetch remote, then `merge --ff-only remote/branch`.
@@ -610,6 +662,51 @@ mod tests {
         assert_eq!(b64_url(b"fo"), "Zm8-");
         assert_eq!(b64_url(b"foo"), "Zm9v");
         assert_eq!(b64_url(b"foobar"), "Zm9vYmFy");
+    }
+
+    /// Moving a tag repoints it WITHOUT flattening the annotation
+    /// (`tag -f` would recreate it lightweight; update-ref keeps the object).
+    #[tokio::test]
+    async fn move_tag_repoints_and_keeps_annotation() {
+        let tmp = std::env::temp_dir().join(format!("sirgit-movetag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
+        std::fs::write(tmp.join("a.txt"), "a\n").unwrap();
+        assert!(git(&["add", "."]).status.success());
+        assert!(git(&["commit", "-q", "-m", "c1"]).status.success());
+        assert!(git(&["tag", "-a", "v1", "-m", "release one"]).status.success());
+        std::fs::write(tmp.join("b.txt"), "b\n").unwrap();
+        assert!(git(&["add", "."]).status.success());
+        assert!(git(&["commit", "-q", "-m", "c2"]).status.success());
+        let c2 = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout).trim().to_string();
+
+        move_tag(tmp.to_str().unwrap(), "v1", &c2).await.unwrap();
+
+        let kind = String::from_utf8_lossy(&git(&["cat-file", "-t", "refs/tags/v1"]).stdout).trim().to_string();
+        assert_eq!(kind, "tag", "annotated tag must stay annotated after a move");
+        let peeled = String::from_utf8_lossy(&git(&["rev-parse", "v1^{commit}"]).stdout).trim().to_string();
+        assert_eq!(peeled, c2, "tag must peel to the new target");
+        let msg = String::from_utf8_lossy(
+            &git(&["for-each-ref", "--format=%(contents)", "refs/tags/v1"]).stdout,
+        )
+        .trim()
+        .to_string();
+        assert_eq!(msg, "release one", "tag message must survive the move");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Orphan commit: no parents, empty tree, pinned under refs/sirgit/orphans/

@@ -45,6 +45,8 @@ interface GraphViewProps {
   onRowAction?: (action: 'move' | 'rebase' | 'squash' | 'merge' | 'squash-merge', sha: string, intoBranch?: string) => void
   /** drag a branch chip onto a row → move the branch to the row's commit */
   onMoveBranch?: (branch: string, targetSha: string) => void
+  /** drag a LOCAL tag chip onto a row → move the tag there (pushed tags refuse) */
+  onMoveTag?: (tag: string, targetSha: string) => void
 }
 
 /**
@@ -67,6 +69,7 @@ export default function GraphView({
   armedRef,
   onRowAction,
   onMoveBranch,
+  onMoveTag,
 }: GraphViewProps) {
   const detailsSha = useUiStore((s) => s.detailsSha)
   const ordered = useGraphStore((s) => s.ordered)
@@ -247,6 +250,7 @@ export default function GraphView({
               onRowAction={onRowAction}
               dimmed={spotlight && !involved.has(row.sha)}
               onMoveBranch={onMoveBranch}
+              onMoveTag={onMoveTag}
             />
           )
         })}
@@ -312,6 +316,7 @@ const RowWrapper = memo(function RowWrapper({
   onRowAction,
   dimmed,
   onMoveBranch,
+  onMoveTag,
 }: {
   row: CommitRow
   index: number
@@ -332,6 +337,7 @@ const RowWrapper = memo(function RowWrapper({
   /** spotlight: the row is outside the preview's involved set */
   dimmed?: boolean
   onMoveBranch?: (branch: string, targetSha: string) => void
+  onMoveTag?: (tag: string, targetSha: string) => void
 }) {
   return (
     <div
@@ -355,6 +361,7 @@ const RowWrapper = memo(function RowWrapper({
         onRowAction={onRowAction}
         dimmed={dimmed}
         onMoveBranch={onMoveBranch}
+        onMoveTag={onMoveTag}
       />
     </div>
   )

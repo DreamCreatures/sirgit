@@ -281,6 +281,40 @@ export default function RepoPage() {
       onConfirm: run,
     })
   }
+  // moving a tag is local-only by policy: tags on the remote are published
+  // releases (their chip refuses the drag; this guard covers a stale cache)
+  const moveTagTo = (tag: string, targetSha: string) => {
+    if (refs?.remoteTags?.includes(tag)) {
+      toast({
+        kind: 'error',
+        title: `"${tag}" is on the remote`,
+        detail: 'Published releases stay pinned — delete the remote tag first, or move it from the terminal.',
+      })
+      return
+    }
+    useUiStore.getState().setDialog({
+      kind: 'confirm',
+      danger: true,
+      title: `Move tag "${tag}"`,
+      message: `"${tag}" will point at ${targetSha.slice(0, 7)} — it keeps its annotation, and the commit it marked stays in history (recoverable via reflog).`,
+      confirmLabel: 'Move',
+      onConfirm: () => {
+        useUiStore.getState().beginOp('Move')
+        void api
+          .tagMove(path, tag, targetSha)
+          .then(() => {
+            toast({ kind: 'success', title: `Moved ${tag} to ${targetSha.slice(0, 7)}` })
+            refreshAll()
+          })
+          .catch((e: unknown) => {
+            const { title: t, detail: d } = friendlyError(e)
+            toast({ kind: 'error', title: t, detail: d })
+            refreshAll()
+          })
+          .finally(() => useUiStore.getState().endOp())
+      },
+    })
+  }
   // moving a REMOTE branch (origin/x) = pushing <sha>:<branch> to that remote
   const moveRemoteRefTo = (remoteRef: string, targetSha: string) => {
     const slash = remoteRef.indexOf('/')
@@ -503,6 +537,7 @@ export default function RepoPage() {
               armedRef={armedRef}
               onRowAction={onRowAction}
               onMoveBranch={moveBranchTo}
+          onMoveTag={moveTagTo}
               renderActions={(sha) => (
                 <SelectionActions
                   path={path}

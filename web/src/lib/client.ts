@@ -124,6 +124,8 @@ export const api = {
   uncommit: (path: string) => post('/uncommit', { path }),
   branchMove: (path: string, branch: string, target: string) =>
     post('/branch/move', { path, branch, target }),
+  tagMove: (path: string, tag: string, target: string) =>
+    post('/tag/move', { path, tag, target }),
   branchMerge: (path: string, from: string, into: string, squash = false) =>
     post<{ title?: string; body?: string }>('/branch/merge', { path, from, into, squash }),
   squash: (path: string, branch: string, target: string) =>
