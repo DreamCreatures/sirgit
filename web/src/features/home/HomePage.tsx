@@ -217,11 +217,11 @@ export default function HomePage() {
     }
   }
 
-  /** URL typed/pasted → autofill `<last-working-dir>/<repo-name>` (until the
-   * user edits the destination by hand; a new URL re-engages the autofill) */
+  /** URL typed/pasted → autofill `<last-working-dir>/<repo-name>` until the
+   * user edits the destination by hand (their choice then sticks) */
   const onCloneUrlChange = (v: string) => {
     setCloneUrl(v)
-    setDestDirty(false)
+    if (destDirty) return
     const name = repoNameFromUrl(v)
     const root = useUiStore.getState().lastWorkDir
     setCloneDest(name ? (root ? `${root}/${name}` : name) : '')
