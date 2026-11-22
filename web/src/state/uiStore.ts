@@ -170,6 +170,13 @@ interface UiState {
   addRepos(paths: string[]): void
   removeRepo(path: string): void
   clearRepos(): void
+
+  /**
+   * Most recent working directory used on the home page (Add-submit root or
+   * a clone's destination parent) — the default ROOT for clone destinations.
+   */
+  lastWorkDir: string | null
+  setLastWorkDir(v: string): void
 }
 
 let toastId = 0
@@ -327,5 +334,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   clearRepos() {
     localStorage.setItem(REPOS_KEY, '[]')
     set({ repos: [] })
+  },
+
+  lastWorkDir: localStorage.getItem('sirgit.lastWorkDir'),
+  setLastWorkDir: (v) => {
+    localStorage.setItem('sirgit.lastWorkDir', v)
+    set({ lastWorkDir: v })
   },
 }))

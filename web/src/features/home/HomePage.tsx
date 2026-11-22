@@ -11,9 +11,24 @@ function cleanPath(p: string): string {
   return p.trim()
 }
 
+/** parent directory with trailing slash stripped ("/a/b/c" → "/a/b") */
+function parentOf(p: string): string | null {
+  const parent = p.replace(/\/+$/, '').replace(/\/[^/]*$/, '')
+  return parent || null
+}
+
+/**
+ * Repo name from any clone URL shape: https://host/u/repo.git,
+ * git@host:u/repo.git, or a bare path — last segment, ".git" stripped.
+ */
+function repoNameFromUrl(u: string): string {
+  const base = u.trim().replace(/\/+$/, '').split(/[/:]/).pop() ?? ''
+  return base.replace(/\.git$/, '')
+}
+
 export default function HomePage() {
   const navigate = useNavigate()
-  const { recentRepos, addRecentRepo, removeRecentRepo, clearRecentRepos, repos, addRepos, removeRepo, clearRepos, toast } =
+  const { recentRepos, addRecentRepo, removeRecentRepo, clearRecentRepos, repos, addRepos, removeRepo, clearRepos, setLastWorkDir, toast } =
     useUiStore()
   const [pathInput, setPathInput] = useState(() => useUiStore.getState().backSeedPath ?? '')
   useEffect(() => {
@@ -24,6 +39,9 @@ export default function HomePage() {
   }, [])
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneDest, setCloneDest] = useState('')
+  // dest autofill follows the URL until the user edits it by hand; a NEW url
+  // re-engages the autofill
+  const [destDirty, setDestDirty] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
 
   // --- ungit-style sibling autocomplete: as you type a path, list the typed
@@ -80,12 +98,17 @@ export default function HomePage() {
     try {
       const qs = await api.quickstatus(path)
       if (qs.type === 'repo' || qs.type === 'bare') {
-        addRepos([qs.gitRootPath ?? path])
-        toast({ kind: 'success', title: 'Added to repositories', detail: qs.gitRootPath ?? path })
+        const canonical = qs.gitRootPath ?? path
+        addRepos([canonical])
+        // a single repo remembers its PARENT as the working directory
+        const parent = parentOf(canonical)
+        if (parent) setLastWorkDir(parent)
+        toast({ kind: 'success', title: 'Added to repositories', detail: canonical })
       } else if (qs.type === 'uninited') {
         const subs = qs.subRepos ?? []
         if (subs.length > 0) {
           addRepos(subs)
+          setLastWorkDir(path.replace(/\/+$/, ''))
           toast({ kind: 'success', title: `Imported ${subs.length} repositor${subs.length === 1 ? 'y' : 'ies'}`, detail: path })
         } else {
           setBusy(null)
@@ -173,15 +196,18 @@ export default function HomePage() {
 
   const doClone = async () => {
     if (!cloneUrl.trim()) return
-    const dest = cleanPath(cloneDest) || cloneUrl.split('/').pop()?.replace(/\.git$/, '') || 'repo'
+    const dest = cleanPath(cloneDest) || (useUiStore.getState().lastWorkDir ? `${useUiStore.getState().lastWorkDir}/${repoNameFromUrl(cloneUrl)}` : repoNameFromUrl(cloneUrl)) || 'repo'
     setBusy('clone')
     try {
       const { opId } = await api.clone(cloneUrl.trim(), dest)
       await pollOp(opId)
       // clones join the repository list by default (user rule), land in
-      // recent, and open straight away
+      // recent, open straight away, and their parent becomes the new
+      // default working directory for the next clone
       addRepos([dest])
       addRecentRepo(dest)
+      const parent = parentOf(dest)
+      if (parent) setLastWorkDir(parent)
       navigate(`/repository?path=${encodeURIComponent(dest)}`)
     } catch (e) {
       const { title, detail } = friendlyError(e)
@@ -189,6 +215,16 @@ export default function HomePage() {
     } finally {
       setBusy(null)
     }
+  }
+
+  /** URL typed/pasted → autofill `<last-working-dir>/<repo-name>` (until the
+   * user edits the destination by hand; a new URL re-engages the autofill) */
+  const onCloneUrlChange = (v: string) => {
+    setCloneUrl(v)
+    setDestDirty(false)
+    const name = repoNameFromUrl(v)
+    const root = useUiStore.getState().lastWorkDir
+    setCloneDest(name ? (root ? `${root}/${name}` : name) : '')
   }
 
   return (
@@ -295,16 +331,19 @@ export default function HomePage() {
         <div className="flex flex-col gap-2">
           <input
             className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
-            placeholder="https://github.com/user/repo.git"
+            placeholder="https://github.com/user/repo.git — or git@host:u/repo.git"
             value={cloneUrl}
-            onChange={(e) => setCloneUrl(e.target.value)}
+            onChange={(e) => onCloneUrlChange(e.target.value)}
           />
           <div className="flex gap-2">
             <input
               className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
               placeholder="Destination directory (optional)"
               value={cloneDest}
-              onChange={(e) => setCloneDest(e.target.value)}
+              onChange={(e) => {
+                setDestDirty(true)
+                setCloneDest(e.target.value)
+              }}
             />
             <button
               className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-700 disabled:opacity-50"
