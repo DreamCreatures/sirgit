@@ -106,6 +106,18 @@ export default function GraphView({
     return () => ro.disconnect()
   }, [])
 
+  // belt-and-suspenders: correct the cached size on every commit. The
+  // ResizeObserver is the primary signal, but its update goes through the
+  // scheduler and can land a commit late (notably in throttled background
+  // tabs); any committed render re-reads clientWidth/Height for one syscall
+  // and recenters immediately instead of staying one resize behind.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (el.clientWidth !== viewportW) setViewportW(el.clientWidth)
+    if (el.clientHeight !== viewportH) setViewportH(el.clientHeight)
+  })
+
   const totalRows = ordered.length
   // the "next commit" slot above HEAD is ALWAYS reserved — rows sit at a
   // constant offset, so showing/hiding the dashed ghost (hover previews!)
