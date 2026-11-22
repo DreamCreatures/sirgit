@@ -124,7 +124,7 @@ export default function GraphView({
   // never shifts the map or flickers. Hover previews may anchor the ghost
   // above ANY commit (the action's target): row 0 uses the reserved slot,
   // deeper rows get a no-shift overlay in the row above.
-  const ghostSha = ghostTarget ?? (nextCommit ? headSha : null)
+  const ghostSha = ghostTarget ?? null
   const ghostIdx = ghostSha ? ordered.findIndex((r) => r.sha === ghostSha) : -1
   const ghostLane = ghostIdx >= 0 ? (laneLayout.lanes.get(ghostSha!) ?? -1) : -1
   const showGhost = ghostIdx >= 0 && ghostLane >= 0
@@ -133,8 +133,6 @@ export default function GraphView({
   const contentH = totalRows * ROW_H + ghostOffset
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
   const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
-
-  const visibleRows = useMemo(() => ordered.slice(start, end), [ordered, start, end])
 
   // tree layout: center the lane band when the viewport has spare width (e.g.
   // collapsed refs panel) — the trunk already sits mid-band thanks to the
@@ -149,6 +147,27 @@ export default function GraphView({
   const bandW = maxEdge - minEdge
   const originX =
     laneMode === 'tree' ? Math.max(0, Math.floor((viewportW - bandW) / 2) - minEdge) : 0
+
+  // --- HEAD tether (ungit's dashed top node + guide edge): an always-on
+  // marker of where HEAD is, even when newer branches bury it deep in the
+  // view. A dashed circle in HEAD's lane with a dashed guide line down to
+  // the HEAD node. The circle rests in the reserved top slot while HEAD
+  // leads the view; once you scroll past HEAD it PINS to the top edge of
+  // the viewport with a "↑N" badge (click = jump back) — deep-history
+  // orientation ungit itself doesn't give. Strong ring when a prospective
+  // commit is pending (staged / in-flight), subtle when clean. ---
+  const headIdx = headSha ? ordered.findIndex((r) => r.sha === headSha) : -1
+  const headLane = headIdx >= 0 && headSha ? (laneLayout.lanes.get(headSha) ?? -1) : -1
+  const showTether = headIdx >= 0 && headLane >= 0 && !ghostSha
+  const headCenterY = headIdx * ROW_H + ghostOffset + ROW_H / 2
+  const tetherCx = originX + laneX(headLane)
+  // clamp: rest in the reserved top slot, rise with the viewport top once
+  // that slot scrolls out, and never slide below one row above HEAD
+  const tetherTop = Math.max(ROW_H / 2, Math.min(scrollTop + ROW_H / 2, headCenterY - ROW_H))
+  const tetherPinned = tetherTop > ROW_H / 2 + 1
+  const tetherRows = Math.max(0, Math.round((headCenterY - tetherTop) / ROW_H) - 1)
+
+  const visibleRows = useMemo(() => ordered.slice(start, end), [ordered, start, end])
 
   // --- hover preview of a row action (ungit-style): the commit run between
   // the armed subject's tip and the hovered target (first-parent walk, the
@@ -289,6 +308,63 @@ export default function GraphView({
         })}
         {preview && (
           <PreviewOverlay preview={preview} run={previewRun} ordered={ordered} lanes={laneLayout.lanes} topOffset={ghostOffset} originX={originX} />
+        )}
+        {/* HEAD tether paints above the rows so the guide line reads over
+         * hover backgrounds — nothing else renders in HEAD's lane above the
+         * trunk tip, so it never covers a node */}
+        {showTether && (
+          <div
+            className="absolute left-0"
+            style={{
+              top: tetherTop - 24,
+              width: Math.max(120, laneX(laneLayout.laneCount) + 40 + originX),
+              height: Math.max(48, headCenterY - tetherTop + 48),
+              pointerEvents: 'none',
+            }}
+            data-testid="head-tether"
+          >
+            <svg width="100%" height="100%">
+              {/* dashed guide line from the circle down to HEAD's ring */}
+              <line
+                x1={tetherCx}
+                y1={24}
+                x2={tetherCx}
+                y2={24 + (headCenterY - tetherTop) - 17}
+                stroke={laneColor(headLane)}
+                strokeWidth={2}
+                strokeDasharray="3 6"
+                opacity={0.55}
+              />
+              {nextCommit && <circle cx={tetherCx} cy={24} r={12} fill="#18181b" />}
+              <circle
+                cx={tetherCx}
+                cy={24}
+                r={nextCommit ? 10 : 6}
+                fill="none"
+                stroke={laneColor(headLane)}
+                strokeWidth={2}
+                strokeDasharray={nextCommit ? '3 3' : '2 4'}
+                opacity={nextCommit ? 0.85 : 0.55}
+              />
+            </svg>
+            {/* invisible round hit target over the circle — click jumps back */}
+            <button
+              className="absolute rounded-full"
+              style={{ left: tetherCx - 16, top: 8, width: 32, height: 32, pointerEvents: 'auto' }}
+              title={`${currentBranch ?? 'HEAD'} @ ${headSha!.slice(0, 7)} — click to jump to HEAD`}
+              onClick={() => useUiStore.getState().requestScrollTo(headSha!)}
+              data-testid="head-tether-button"
+            />
+            {tetherPinned && tetherRows > 0 && (
+              <span
+                className="absolute rounded-full border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-400"
+                style={{ left: tetherCx + 14, top: 16 }}
+                data-testid="head-tether-badge"
+              >
+                ↑{tetherRows}
+              </span>
+            )}
+          </div>
         )}
         {renderActions && selectedSha && detailsSha !== selectedSha && ordered.some((r) => r.sha === selectedSha) && (
           <ActionPopup
