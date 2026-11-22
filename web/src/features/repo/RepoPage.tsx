@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, GitBranch, RefreshCw, CloudDownload, Download, Loader2, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, GitBranch, RefreshCw, CloudDownload, Download, Loader2, Eye, EyeOff, ListTree, AlignStartVertical } from 'lucide-react'
 import { api, pollOp } from '../../lib/client'
 import { useRefs, useStatus, useConfig } from '../../api/hooks'
 import { useRepoEvents } from '../../lib/ws'
@@ -90,48 +90,34 @@ export default function RepoPage() {
   })
 
   // branch tips drive lane assignment (checked-out branch owns the trunk).
-  // With the non-tracking filter on, hidden branches drop out of the tips and
-  // extraRoots pins remote/tag history — only commits unique to a hidden
-  // branch leave the graph (graphStore prunes by reachability).
-  const hideNonTracking = useUiStore((s) => s.hideNonTracking)
+  // The lane layout (tree/left) is a PER-REPO preference — some projects read
+  // better centered, others classic-left — remembered next to the path.
+  const laneMode = useGraphStore((s) => s.laneMode)
+  const laneModeKey = `sirgit.laneMode:${path}`
+  useEffect(() => {
+    useGraphStore.getState().setLaneMode(
+      localStorage.getItem(laneModeKey) === 'left' ? 'left' : 'tree',
+    )
+  }, [path, laneModeKey])
+  const toggleLaneMode = () => {
+    const next = laneMode === 'tree' ? 'left' : 'tree'
+    localStorage.setItem(laneModeKey, next)
+    useGraphStore.getState().setLaneMode(next)
+  }
   useEffect(() => {
     if (!refs) return
-    const visibleBranches = hideNonTracking
-      ? (refs.branches ?? []).filter(
-          (b) =>
-            b.name === refs.head?.branch ||
-            b.upstream != null ||
-            (refs.remoteBranches ?? []).some((r) => r.name.endsWith(`/${b.name}`)),
-        )
-      : (refs.branches ?? [])
-    const extraRoots = hideNonTracking
-      ? [...(refs.remoteBranches ?? []).map((r) => r.sha), ...(refs.tags ?? []).map((t) => t.sha)]
-      : null
     useGraphStore.getState().setGraphRefs(
-      visibleBranches.map((b) => ({ sha: b.sha, current: b.name === refs.head?.branch })),
+      (refs.branches ?? []).map((b) => ({ sha: b.sha, current: b.name === refs.head?.branch })),
       refs.head?.sha ?? null,
-      extraRoots,
     )
-  }, [refs, hideNonTracking])
+  }, [refs])
 
-  /** branches the non-tracking filter hides (graph chips + tips; the sidebar list keeps them) */
-  const hiddenBranches = useMemo(() => {
-    const set = new Set<string>()
-    if (!hideNonTracking || !refs) return set
-    for (const b of refs.branches ?? []) {
-      if (b.name === refs.head?.branch || b.upstream != null) continue
-      if ((refs.remoteBranches ?? []).some((r) => r.name.endsWith(`/${b.name}`))) continue
-      set.add(b.name)
-    }
-    return set
-  }, [refs, hideNonTracking])
-
-  // ref chips by sha for the graph
+  // ref chips by sha for the graph — NEVER filtered: the branch filter is a
+  // sidebar-list concern only; the map always shows every ref
   const refBySha = useMemo(() => {
     const m = new Map<string, import('../../lib/types').RefInfo[]>()
     const push = (list: import('../../lib/types').RefInfo[] | undefined) => {
       for (const r of list ?? []) {
-        if (r.type === 'branch' && hiddenBranches.has(r.name)) continue
         const arr = m.get(r.sha) ?? []
         arr.push(r)
         m.set(r.sha, arr)
@@ -141,7 +127,7 @@ export default function RepoPage() {
     push(refs?.remoteBranches)
     push(refs?.tags)
     return m
-  }, [refs, hiddenBranches])
+  }, [refs])
 
   // Header fetch/pull operate on the checked-out branch — push lives on the
   // branch/tag action bar (select a ref chip to push it). Pull is disabled
@@ -630,6 +616,22 @@ export default function RepoPage() {
             }
             onClick={() => setSubjectCompact(!subjectCompact)}
             testid="toggle-subjects"
+          />
+          <HeaderButton
+            icon={
+              laneMode === 'tree' ? (
+                <ListTree className="h-3.5 w-3.5" />
+              ) : (
+                <AlignStartVertical className="h-3.5 w-3.5" />
+              )
+            }
+            title={
+              laneMode === 'tree'
+                ? 'Tree layout (trunk centered, branches both sides) — click for left-anchored'
+                : 'Left layout (trunk leftmost, branches right) — click for centered tree'
+            }
+            onClick={toggleLaneMode}
+            testid="toggle-lanemode"
           />
         </div>
       </header>

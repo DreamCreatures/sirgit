@@ -68,9 +68,14 @@ interface UiState {
   subjectCompact: boolean
   setSubjectCompact(v: boolean): void
 
-  /** Graph view: hide branches with no remote twin and no upstream — their chips and unique commits leave the graph */
-  hideNonTracking: boolean
-  setHideNonTracking(v: boolean): void
+  /**
+   * Left-panel branch-list filter. Graph map is NEVER filtered — only this
+   * list shrinks. tracking = has a <remote>/<name> twin or upstream set;
+   * recent = tip committed within the last month (current branch always
+   * listed).
+   */
+  branchFilter: 'all' | 'tracking' | 'recent'
+  setBranchFilter(v: 'all' | 'tracking' | 'recent'): void
 
   /**
    * One-shot commit-box prefill (amend-style) — set by squash merge with the
@@ -185,10 +190,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ subjectCompact: v })
   },
 
-  hideNonTracking: localStorage.getItem('sirgit.hideNonTracking') === '1',
-  setHideNonTracking: (v) => {
-    localStorage.setItem('sirgit.hideNonTracking', v ? '1' : '0')
-    set({ hideNonTracking: v })
+  branchFilter: ((): 'all' | 'tracking' | 'recent' => {
+    const v = localStorage.getItem('sirgit.branchFilter')
+    return v === 'tracking' || v === 'recent' ? v : 'all'
+  })(),
+  setBranchFilter: (v) => {
+    localStorage.setItem('sirgit.branchFilter', v)
+    set({ branchFilter: v })
   },
 
   commitPrefill: null,

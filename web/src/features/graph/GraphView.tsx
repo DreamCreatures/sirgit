@@ -141,12 +141,14 @@ export default function GraphView({
   // alternating lane assignment, so the checked-out branch lands near the
   // viewport middle instead of hugging the left edge. The band spans the
   // OUTERMOST NODE EDGES (± the biggest node radius, HEAD's 15), not lane
-  // centers, so centering is exact. Narrow viewport → 0 → left-anchored
-  // exactly as before.
+  // centers, so centering is exact. 'left' mode never centers (classic
+  // left-anchored graph); narrow viewport → 0 → left-anchored too.
+  const laneMode = useGraphStore((s) => s.laneMode)
   const minEdge = LANE_GUTTER + LANE_W / 2 - 15
   const maxEdge = laneX(laneLayout.laneCount - 1) + 15
   const bandW = maxEdge - minEdge
-  const originX = Math.max(0, Math.floor((viewportW - bandW) / 2) - minEdge)
+  const originX =
+    laneMode === 'tree' ? Math.max(0, Math.floor((viewportW - bandW) / 2) - minEdge) : 0
 
   // --- hover preview of a row action (ungit-style): the commit run between
   // the armed subject's tip and the hovered target (first-parent walk, the

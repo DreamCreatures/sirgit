@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { api } from '../lib/client'
 import type { CommitRow } from '../lib/types'
 import { orderRows } from '../lib/order'
-import { assignLanes, buildEdges, type BranchTip, type EdgeSeg, type LaneLayout } from '../lib/lanes'
+import { assignLanes, buildEdges, type BranchTip, type EdgeSeg, type LaneLayout, type LaneMode } from '../lib/lanes'
 
 /**
  * Client-side commit-graph state. Pages are fetched at disjoint offsets and
@@ -16,13 +16,8 @@ interface GraphState {
   /** branch tips for lane assignment (checked-out branch owns the trunk) */
   branchTips: BranchTip[]
   headSha: string | null
-  /**
-   * Non-tracking-branch filter: extra reachability roots (remote-branch and
-   * tag tips) that must stay visible. null = filter off, every loaded row is
-   * shown; an array = only rows reachable from tips ∪ extraRoots ∪ HEAD are
-   * ordered/rendered (rowsBySha keeps everything for previews + un-filtering).
-   */
-  extraRoots: string[] | null
+  /** lane layout: centered tree around the trunk, or classic left-anchored */
+  laneMode: LaneMode
   /** display order (date-order topological over loaded rows) */
   ordered: CommitRow[]
   laneLayout: LaneLayout
@@ -35,7 +30,8 @@ interface GraphState {
   exhausted: boolean
 
   reset(path: string): void
-  setGraphRefs(tips: BranchTip[], headSha: string | null, extraRoots?: string[] | null): void
+  setGraphRefs(tips: BranchTip[], headSha: string | null): void
+  setLaneMode(mode: LaneMode): void
   loadFirstPage(): Promise<void>
   /** pageSize may be raised while seeking a deep row (scroll-to-sha) */
   loadOlder(pageSize?: number): Promise<void>
@@ -46,27 +42,10 @@ function derive(
   rowsBySha: Map<string, CommitRow>,
   tips: BranchTip[],
   headSha: string | null,
-  extraRoots?: string[] | null,
+  laneMode: LaneMode,
 ) {
-  let rows = [...rowsBySha.values()]
-  if (extraRoots) {
-    // branch filter active: a row stays only if reachable from the VISIBLE
-    // refs — tips already exclude hidden branches; extraRoots pins remote
-    // and tag history so shared/remote commits never disappear
-    const reach = new Set<string>()
-    const stack: string[] = [...tips.map((t) => t.sha), ...extraRoots]
-    if (headSha) stack.push(headSha)
-    while (stack.length > 0) {
-      const sha = stack.pop()!
-      if (reach.has(sha)) continue
-      reach.add(sha)
-      const row = rowsBySha.get(sha)
-      if (row) stack.push(...row.parents)
-    }
-    rows = rows.filter((r) => reach.has(r.sha))
-  }
-  const ordered = orderRows(rows)
-  const laneLayout = assignLanes(ordered, tips, headSha)
+  const ordered = orderRows([...rowsBySha.values()])
+  const laneLayout = assignLanes(ordered, tips, headSha, laneMode)
   const edges = buildEdges(ordered, laneLayout.lanes)
   return { ordered, laneLayout, edges }
 }
@@ -76,7 +55,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   rowsBySha: new Map(),
   branchTips: [],
   headSha: null,
-  extraRoots: null,
+  laneMode: 'tree',
   ordered: [],
   laneLayout: { lanes: new Map(), laneCount: 1 },
   edges: [],
@@ -92,7 +71,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       rowsBySha: new Map(),
       branchTips: [],
       headSha: null,
-      extraRoots: null,
       ordered: [],
       laneLayout: { lanes: new Map(), laneCount: 1 },
       edges: [],
@@ -105,10 +83,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     void get().loadFirstPage()
   },
 
-  setGraphRefs(tips, headSha, extraRoots = null) {
-    set({ branchTips: tips, headSha, extraRoots })
-    const { rowsBySha } = get()
-    if (rowsBySha.size > 0) set(derive(rowsBySha, tips, headSha, extraRoots))
+  setGraphRefs(tips, headSha) {
+    set({ branchTips: tips, headSha })
+    const { rowsBySha, laneMode } = get()
+    if (rowsBySha.size > 0) set(derive(rowsBySha, tips, headSha, laneMode))
+  },
+
+  setLaneMode(mode) {
+    set({ laneMode: mode })
+    const { rowsBySha, branchTips, headSha } = get()
+    if (rowsBySha.size > 0) set(derive(rowsBySha, branchTips, headSha, mode))
   },
 
   async loadFirstPage() {
@@ -126,7 +110,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       const page = await api.log(path, nextOffset, pageSize)
       const merged = new Map(rowsBySha)
       for (const r of page.rows) merged.set(r.sha, r)
-      const derived = derive(merged, get().branchTips, get().headSha, get().extraRoots)
+      const derived = derive(merged, get().branchTips, get().headSha, get().laneMode)
       set({
         rowsBySha: merged,
         ...derived,
@@ -161,7 +145,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const rowsBySha = new Map(get().rowsBySha)
     for (const r of delta.added ?? []) rowsBySha.set(r.sha, r)
     for (const sha of delta.removed ?? []) rowsBySha.delete(sha)
-    const derived = derive(rowsBySha, get().branchTips, get().headSha, get().extraRoots)
+    const derived = derive(rowsBySha, get().branchTips, get().headSha, get().laneMode)
     // NOTE: nextOffset intentionally not shifted — new commits are inserted at
     // the top of the server list, so the next page may briefly overlap already
     // loaded rows; the sha-keyed merge dedupes them (never skips, unlike an

@@ -68,6 +68,29 @@ describe('assignLanes (branch chains)', () => {
     expect([...lanes.values()].every((l) => l === 0)).toBe(true)
   })
 
+  it("left mode anchors the trunk at lane 0 and stacks branches right by recency", () => {
+    const ordered = [
+      row('a1', 't2'),
+      row('t3', 't2'),
+      row('b2', 'b1'),
+      row('b1', 't1'),
+      row('t2', 't1'),
+      row('t1'),
+    ]
+    const tips = [
+      { sha: 't3', current: true },
+      { sha: 'a1', current: false },
+      { sha: 'b2', current: false },
+    ]
+    const { lanes, laneCount } = assignLanes(ordered, tips, 't3', 'left')
+    expect(laneCount).toBe(3)
+    expect(lanes.get('t1')).toBe(0) // trunk leftmost
+    expect(lanes.get('t3')).toBe(0)
+    expect(lanes.get('a1')).toBe(1) // newest side tip closest
+    expect(lanes.get('b1')).toBe(2)
+    expect(lanes.get('b2')).toBe(2)
+  })
+
   it('falls back to topology-only lanes without tips', () => {
     // merge commit m(x, y): extra parent opens its own lane, r consolidates
     const ordered = [row('m', 'x', 'y'), row('x', 'r'), row('y', 'r'), row('r')]

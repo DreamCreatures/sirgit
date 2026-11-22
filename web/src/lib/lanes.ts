@@ -4,16 +4,17 @@ import type { CommitRow } from './types'
  * Lane assignment over the display-ordered rows.
  *
  * With branch tips (the app always passes them), lanes follow BRANCHES —
- * gitgraph/GitButler style, laid out as a TREE around the working branch:
- * - the checked-out branch owns the trunk; its first-parent chain runs
- *   straight down the MIDDLE of the lane band;
- * - every other branch's chain gets its own column, alternating sides around
- *   the trunk (newest tip → trunk+1, next → trunk−1, …) so branches fan out
- *   left AND right instead of stacking to the right — with the band centered
- *   by the view (GraphView's originX), the HEAD branch sits where the eye
- *   rests, not glued to the left edge;
- * - tags never affect lanes; commits unreachable from any branch tip (merged
- *   and deleted branches) form their own chains as fallback.
+ * gitgraph/GitButler style — in one of two switchable layouts:
+ * - 'tree' (default): the checked-out branch owns the trunk; its first-parent
+ *   chain runs straight down the MIDDLE of the lane band; every other
+ *   branch's chain gets its own column, alternating sides around the trunk
+ *   (newest tip → trunk+1, next → trunk−1, …) so branches fan out left AND
+ *   right — with the band centered by the view (GraphView's originX), the
+ *   HEAD branch sits where the eye rests, not glued to the left edge;
+ * - 'left': the classic layout — trunk on lane 0 (leftmost), side branches
+ *   stack to the right ordered by tip recency; nothing centers.
+ * Tags never affect lanes; commits unreachable from any branch tip (merged
+ * and deleted branches) form their own chains as fallback.
  *
  * Without tips (unit tests, unknown refs) it falls back to the original
  * topology-only algorithm: a commit continues its parent's lane, merge
@@ -22,8 +23,10 @@ import type { CommitRow } from './types'
  *
  * Pure + deterministic so it can be unit-tested and memoized.
  */
+export type LaneMode = 'tree' | 'left'
+
 export interface LaneLayout {
-  /** sha → lane slot (0 = leftmost); the trunk holds the middle slot */
+  /** sha → lane slot (0 = leftmost); in tree mode the trunk holds the middle slot */
   lanes: Map<string, number>
   laneCount: number
 }
@@ -38,9 +41,10 @@ export function assignLanes(
   ordered: CommitRow[],
   tips: BranchTip[] = [],
   headSha?: string | null,
+  mode: LaneMode = 'tree',
 ): LaneLayout {
   if (tips.length === 0 && !headSha) return assignLanesTopo(ordered)
-  return assignLanesChains(ordered, tips, headSha)
+  return assignLanesChains(ordered, tips, headSha, mode)
 }
 
 /** Topology-only assignment (legacy fallback): parent-lane continuation. */
@@ -113,6 +117,7 @@ function assignLanesChains(
   ordered: CommitRow[],
   tips: BranchTip[],
   headSha: string | null | undefined,
+  mode: LaneMode,
 ): LaneLayout {
   const rowBySha = new Map<string, CommitRow>()
   const idxBySha = new Map<string, number>()
@@ -170,6 +175,18 @@ function assignLanesChains(
       const rows = walk(row.sha)
       if (rows.length > 0) chains.push({ rows, trunk: false })
     }
+  }
+
+  if (mode === 'left') {
+    // classic layout: trunk owns lane 0, side chains stack to the right
+    // ordered by tip recency (newest tip = closest branch column)
+    let lane = 1
+    for (const chain of chains) {
+      const l = chain.trunk ? 0 : lane
+      for (const r of chain.rows) lanes.set(r.sha, l)
+      if (!chain.trunk) lane++
+    }
+    return { lanes, laneCount: Math.max(1, lane) }
   }
 
   // tree layout: trunk = offset 0; side chains ALTERNATE sides around it
