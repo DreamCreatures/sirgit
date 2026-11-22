@@ -24,9 +24,12 @@ export default function AppDialog() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    // a freshly opened dialog never inherits the previous one's leftovers:
+    // error (a failed op's inline message), pending spinner, or prompt value
+    setError(null)
+    setPending(null)
     if (dialog?.kind === 'prompt') {
       setValue(dialog.initial)
-      setError(null)
       inputRef.current?.focus()
       inputRef.current?.select()
     }
