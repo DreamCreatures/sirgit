@@ -791,21 +791,27 @@ function ActionPopup({
     top = Math.max(top, rect.top + 4)
   }
 
-  // horizontal: left edge aligned with the SELECTED chip (a tag pick aligns
-  // to the tag, even on the node's far side; a node pick aligns to the
-  // row's last chip). The bar spans the row above, so it may use the full
-  // container width: when the chip sits close to the right edge and the
-  // natural single-row width would run past it, RIGHT-ALIGN the bar —
-  // shifting left beats wrapping into a two-row block that towers over
-  // neighbouring rows. Wrapping stays only as the fallback when the whole
-  // container is narrower than the bar.
+  // horizontal — adjacent to the SELECTED thing: a ref pick (branch/tag/
+  // remote) aligns its left edge with that chip; a node pick anchors 8px
+  // right of the NODE itself (sibling spacing — anchoring past the row's
+  // chips left node-picked bars 100+px away from what they belong to). The
+  // bar spans the row above, so it may use the full container width: when
+  // the anchor sits close to the right edge and the natural single-row
+  // width would run past it, RIGHT-ALIGN the bar — shifting left beats
+  // wrapping into a two-row block that towers over neighbouring rows.
+  // Wrapping stays only as the fallback when the whole container is
+  // narrower than the bar.
   const laneXBased = rect.left + originX + Math.max(60, laneX(Math.min(laneCount, 6)) + 8)
   const rowEl = container.querySelector(`[data-sha="${sha}"]`)
   const anchorEl = (
     (selectedRef && rowEl?.querySelector(`[data-ref="${selectedRef.kind}:${selectedRef.name}"]`)) ||
-    (rowEl ? ([...rowEl.querySelectorAll('[data-testid="graph-ref-chip"]')].pop() as HTMLElement | undefined) : undefined)
+    rowEl?.querySelector('[data-testid="graph-node"]') ||
+    undefined
   )?.getBoundingClientRect?.() ?? null
-  let left = Math.max(rect.left + 8, anchorEl ? anchorEl.left : laneXBased)
+  let left = Math.max(
+    rect.left + 8,
+    anchorEl ? (selectedRef ? anchorEl.left : anchorEl.right + 8) : laneXBased,
+  )
   if (left + popupW > rect.right - 8) left = Math.max(rect.left + 8, rect.right - 8 - popupW)
   // maxWidth is PLACEMENT-INDEPENDENT (full container width): the measured
   // popupW is then always the natural single-row width. Deriving it from
