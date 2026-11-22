@@ -39,9 +39,6 @@ export default function HomePage() {
   }, [])
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneDest, setCloneDest] = useState('')
-  // dest autofill follows the URL until the user edits it by hand; a NEW url
-  // re-engages the autofill
-  const [destDirty, setDestDirty] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
 
   // --- ungit-style sibling autocomplete: as you type a path, list the typed
@@ -217,14 +214,16 @@ export default function HomePage() {
     }
   }
 
-  /** URL typed/pasted → autofill `<last-working-dir>/<repo-name>`, but only
-   * once the input is a complete git URL (ends in ".git") — mid-typing
-   * partials would fill garbage (user rule). A hand-edited destination
-   * always sticks. */
+  /** URL typed/pasted → autofill `<last-working-dir>/<repo-name>` when the
+   * input is a complete git URL (ends in ".git"); anything else — cleared,
+   * mid-typing partials, garbage — CLEARS the destination (user rule: no
+   * stale generated values) */
   const onCloneUrlChange = (v: string) => {
     setCloneUrl(v)
-    if (destDirty) return
-    if (!/\.git$/.test(v.trim())) return
+    if (!/\.git$/.test(v.trim())) {
+      setCloneDest('')
+      return
+    }
     const name = repoNameFromUrl(v)
     const root = useUiStore.getState().lastWorkDir
     setCloneDest(name ? (root ? `${root}/${name}` : name) : '')
@@ -347,10 +346,7 @@ export default function HomePage() {
               className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
               placeholder="Destination directory (optional)"
               value={cloneDest}
-              onChange={(e) => {
-                setDestDirty(true)
-                setCloneDest(e.target.value)
-              }}
+              onChange={(e) => setCloneDest(e.target.value)}
             />
             <button
               className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-700 disabled:opacity-50"
