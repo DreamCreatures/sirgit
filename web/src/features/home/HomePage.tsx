@@ -217,11 +217,14 @@ export default function HomePage() {
     }
   }
 
-  /** URL typed/pasted → autofill `<last-working-dir>/<repo-name>` until the
-   * user edits the destination by hand (their choice then sticks) */
+  /** URL typed/pasted → autofill `<last-working-dir>/<repo-name>`, but only
+   * once the input is a complete git URL (ends in ".git") — mid-typing
+   * partials would fill garbage (user rule). A hand-edited destination
+   * always sticks. */
   const onCloneUrlChange = (v: string) => {
     setCloneUrl(v)
     if (destDirty) return
+    if (!/\.git$/.test(v.trim())) return
     const name = repoNameFromUrl(v)
     const root = useUiStore.getState().lastWorkDir
     setCloneDest(name ? (root ? `${root}/${name}` : name) : '')
