@@ -7,7 +7,7 @@ import { useUiStore } from '../../state/uiStore'
 import GraphRow from './GraphRow'
 import GraphEdges, { laneColor } from './GraphEdges'
 
-export const ROW_H = 56
+export const ROW_H = 44
 // lane spacing: wide enough that a sibling lane's curve reaches the big HEAD
 // node (r 15 + faint ring) steeply instead of slicing along its edge band
 const LANE_W = 46
@@ -130,13 +130,13 @@ export default function GraphView({
   const showGhost = ghostIdx >= 0 && ghostLane >= 0
   const ghostOffset = totalRows > 0 ? ROW_H : 0
   // --- selection gap: while a row's action popup is up, that row gains
-  // breathing room on BOTH sides — 75% of a row height above and below
-  // ("distance between sibling nodes +75%", per the user) — and the bar
-  // floats in the opened space above instead of over the row ABOVE, which
-  // is exactly the move/drag target the selection exists to act on. All
-  // index→y math goes through rowTop so rows, edges, ghost, tether and
-  // previews agree. ---
-  const SEL_GAP = Math.round(ROW_H * 0.75)
+  // breathing room on BOTH sides — 50% of a row height above and below
+  // (user spec) — so the bar never covers the row ABOVE, which is exactly
+  // the move/drag target the selection exists to act on. The bar itself
+  // TUCKS INTO the selected row's top padding (6px in) so it reads attached,
+  // not detached. All index→y math goes through rowTop so rows, edges,
+  // ghost, tether and previews agree. ---
+  const SEL_GAP = Math.round(ROW_H * 0.5)
   const popupActive =
     !!renderActions && selectedSha != null && detailsSha !== selectedSha && ordered.some((r) => r.sha === selectedSha)
   const selGapIdx = popupActive ? ordered.findIndex((r) => r.sha === selectedSha) : -1
@@ -703,14 +703,15 @@ function PreviewOverlay({
 
 
 /**
- * Floating action popup rendered on the row ABOVE the selected one, its left
- * edge aligned with the selected chip — the grown action set no longer fits
- * beside a 3rd/4th chip, and spanning the row above keeps the selected row
- * and its siblings fully clickable. Flips BELOW the row only when there is
- * no room above (selected row at the viewport top). Rendered through a
- * portal at fixed viewport coordinates so no sibling panel (drawer, sidebar)
- * can clip it; re-anchors on scroll, clamps inside the viewport, and
- * dismisses on outside click.
+ * Floating action popup tucked onto the TOP of the selected row (bottom edge
+ * 6px inside it — attached, not floating a gap away), its left edge aligned
+ * with the selected chip. The selection gap above the row absorbs the rest
+ * of the bar's height, so it never covers the row ABOVE — the move/drag
+ * target the selection exists to act on. Flips BELOW the row only when there
+ * is no room above at all (selected row at the viewport top). Rendered
+ * through a portal at fixed viewport coordinates so no sibling panel
+ * (drawer, sidebar) can clip it; re-anchors on scroll, clamps inside the
+ * viewport, and dismisses on outside click.
  */
 function ActionPopup({
   sha,
@@ -780,11 +781,13 @@ function ActionPopup({
   if (!container) return null
   const rect = container.getBoundingClientRect()
   const rowTopY = rect.top + index * ROW_H + topOffset + gapAbove - scrollTop
-  // rest the bar on the row ABOVE the selected one (6px gap); flip below
-  // when that would leave the container (selected row at the viewport top)
-  let top = rowTopY - popupH - 6
+  // the bar TUCKS INTO the selected row's top padding — bottom edge 6px
+  // inside the row (attached, not floating a gap away); the selection gap
+  // above absorbs the rest. Flip below only when the selected row sits at
+  // the viewport top with no room above at all.
+  let top = rowTopY - popupH + 6
   if (top < rect.top + 4) {
-    top = Math.min(rowTopY + ROW_H + 6, rect.bottom - popupH - 4)
+    top = Math.min(rowTopY + ROW_H + 4, rect.bottom - popupH - 4)
     top = Math.max(top, rect.top + 4)
   }
 
@@ -815,7 +818,7 @@ function ActionPopup({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-40 flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-600 bg-zinc-900 px-2 py-1.5 shadow-2xl"
+      className="fixed z-40 flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-600 bg-zinc-900 px-2 py-1 shadow-2xl"
       style={{ top, left, maxWidth: Math.max(200, maxW), visibility: popupW ? 'visible' : 'hidden' }}
       data-testid="selection-popup"
     >
