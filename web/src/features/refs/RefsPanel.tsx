@@ -140,9 +140,9 @@ export default function RefsPanel({ path }: { path: string }) {
         <div className="flex overflow-hidden rounded-md border border-zinc-700/80" data-testid="branch-filter">
           {(
             [
-              ['all', 'all', 'All branches'],
-              ['tracking', 'track', 'Only branches with a remote twin (<remote>/<branch>) or an upstream'],
-              ['recent', 'recent', 'Only branches with commits in the last month'],
+              ['all', 'All', 'All branches'],
+              ['tracking', 'Track', 'Only branches with a remote twin (<remote>/<branch>) or an upstream'],
+              ['recent', 'Recent', 'Only branches with commits in the last month'],
             ] as const
           ).map(([value, label, title]) => (
             <button
