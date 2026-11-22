@@ -22,7 +22,6 @@ export default function RefsPanel({ path }: { path: string }) {
   const setCollapsed = useUiStore((s2) => s2.setRefsPanelCollapsed)
   const branchFilter = useUiStore((s2) => s2.branchFilter)
   const setBranchFilter = useUiStore((s2) => s2.setBranchFilter)
-  const selectedRef = useUiStore((s2) => s2.selectedRef)
   // tip dates for the "recent" filter — tips of live branches are always in
   // the loaded window; a branch whose tip row isn't loaded is old by
   // definition, so missing reads as not-recent
@@ -112,16 +111,18 @@ export default function RefsPanel({ path }: { path: string }) {
   const head = data?.head
 
   /**
-   * Section ordering (user rule): the SELECTED ref floats to the top, the
-   * rest sort by tip date — latest first (an unloaded tip reads as ancient
-   * and sorts last; date ties fall back to name). Remotes are just names —
-   * no dates, they stay alphabetical.
+   * Section ordering (user rule: "selected on top" = HEAD, not map
+   * selection): the pinned ref floats to the top — the checked-out branch
+   * in Branches, its <remote>/<current> twin in Remote branches — and the
+   * rest sort by tip date, latest first (an unloaded tip reads as ancient
+   * and sorts last; date ties fall back to name). Tags have no HEAD — pure
+   * date order. Remotes are just names — no dates, they stay alphabetical.
    */
-  const pinAndSort = <T extends { name: string; sha: string }>(list: T[], kind: 'branch' | 'remote-branch' | 'tag'): T[] =>
+  const pinAndSort = <T extends { name: string; sha: string }>(list: T[], isPinned: (r: T) => boolean): T[] =>
     [...list].sort((a, b) => {
-      const aSel = selectedRef?.kind === kind && selectedRef.name === a.name ? 1 : 0
-      const bSel = selectedRef?.kind === kind && selectedRef.name === b.name ? 1 : 0
-      if (aSel !== bSel) return bSel - aSel
+      const aPin = isPinned(a) ? 1 : 0
+      const bPin = isPinned(b) ? 1 : 0
+      if (aPin !== bPin) return bPin - aPin
       const da = rowsBySha.get(a.sha)?.commitDate ?? 0
       const db = rowsBySha.get(b.sha)?.commitDate ?? 0
       if (da !== db) return db - da
@@ -140,10 +141,13 @@ export default function RefsPanel({ path }: { path: string }) {
       const tipDate = rowsBySha.get(b.sha)?.commitDate ?? 0
       return Date.now() / 1000 - tipDate <= RECENT_WINDOW_S
     }),
-    'branch',
+    (b) => b.name === head?.branch,
   )
-  const sortedRemoteBranches = pinAndSort(remoteBranches, 'remote-branch')
-  const sortedTags = pinAndSort(tags, 'tag')
+  const sortedRemoteBranches = pinAndSort(
+    remoteBranches,
+    (r) => !!head?.branch && r.name.endsWith(`/${head.branch}`),
+  )
+  const sortedTags = pinAndSort(tags, () => false)
   const branchCountLabel =
     visibleBranches.length === branches.length
       ? `${branches.length}`
