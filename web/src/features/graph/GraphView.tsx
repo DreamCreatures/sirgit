@@ -719,11 +719,17 @@ function ActionPopup({
   children: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const [popupW, setPopupW] = useState(0)
   const [popupH, setPopupH] = useState(44)
 
-  // measure real height (wrapped button rows) for above/below placement + clamping
+  // measure natural size before showing: placement right-aligns using the
+  // real single-row width, so the bar must never flash in the wrong spot
+  // (popupW=0 renders one hidden frame)
   useLayoutEffect(() => {
-    if (ref.current) setPopupH(ref.current.offsetHeight)
+    if (ref.current) {
+      setPopupW(ref.current.offsetWidth)
+      setPopupH(ref.current.offsetHeight)
+    }
   })
 
   useEffect(() => {
@@ -761,27 +767,30 @@ function ActionPopup({
 
   // horizontal: left edge aligned with the SELECTED chip (a tag pick aligns
   // to the tag, even on the node's far side; a node pick aligns to the
-  // row's last chip) — the bar spans the row above, so it has the full
-  // container width; when the chip sits too far right, slide the bar left
-  // to keep a 300px window; last resort = node side
+  // row's last chip). The bar spans the row above, so it may use the full
+  // container width: when the chip sits close to the right edge and the
+  // natural single-row width would run past it, RIGHT-ALIGN the bar —
+  // shifting left beats wrapping into a two-row block that towers over
+  // neighbouring rows. Wrapping stays only as the fallback when the whole
+  // container is narrower than the bar.
   const laneXBased = rect.left + originX + Math.max(60, laneX(Math.min(laneCount, 6)) + 8)
   const rowEl = container.querySelector(`[data-sha="${sha}"]`)
   const anchorEl = (
     (selectedRef && rowEl?.querySelector(`[data-ref="${selectedRef.kind}:${selectedRef.name}"]`)) ||
     (rowEl ? ([...rowEl.querySelectorAll('[data-testid="graph-ref-chip"]')].pop() as HTMLElement | undefined) : undefined)
   )?.getBoundingClientRect?.() ?? null
-  let left = anchorEl ? anchorEl.left : laneXBased
-  let maxW = rect.right - left - 8
-  if (maxW < 300) {
-    left = Math.max(rect.left + 8, rect.right - 300 - 8)
-    maxW = rect.right - left - 8
-  }
+  let left = Math.max(rect.left + 8, anchorEl ? anchorEl.left : laneXBased)
+  if (left + popupW > rect.right - 8) left = Math.max(rect.left + 8, rect.right - 8 - popupW)
+  // probe frame (popupW=0): constrain only to the full container so the
+  // measured width is the NATURAL single-row width — constraining to the
+  // anchor's remaining space would bake the wrap in and it'd never unwrap
+  const maxW = popupW ? rect.right - 8 - left : rect.width - 16
 
   return createPortal(
     <div
       ref={ref}
       className="fixed z-40 flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-600 bg-zinc-900 px-2 py-1.5 shadow-2xl"
-      style={{ top, left, maxWidth: Math.max(220, maxW) }}
+      style={{ top, left, maxWidth: Math.max(200, maxW), visibility: popupW ? 'visible' : 'hidden' }}
       data-testid="selection-popup"
     >
       {children}
