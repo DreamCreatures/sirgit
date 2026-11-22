@@ -59,8 +59,9 @@ interface GraphRowProps {
   onCheckout?: (name: string) => void
   /**
    * The armed ref (a selected branch/remote chip) — selecting it IS arming:
-   * every other row grows contextual target buttons (ungit's drop-action
-   * model: one click on the target row instead of a popup round-trip).
+   * rows become potential targets, but their buttons stay hidden until the
+   * row's commit node is hovered (ungit's drop-action model, decluttered —
+   * one row's actions at a time instead of a button wall on every row).
    */
   armedRef?: { name: string; tipSha: string; remote?: boolean } | null
   /** a row's action button was clicked — sha is this row's commit */
@@ -85,10 +86,11 @@ const NODE_PAD = 8
  * Memoized — re-renders only when its own inputs change.
  * Only the node and the ref chips are clickable — the row body is inert,
  * so reading/sweeping the history never pops the action bar. Selecting a
- * branch/remote chip ARMS it: rows grow contextual target buttons
- * ([rebase][squash] while the current branch is armed, [<- move] always,
- * [merge][squash merge] on the receiving branch's row), and local branch
- * chips can still be dragged onto a row to move the branch.
+ * branch/remote chip ARMS it, but the target buttons stay hidden: hovering
+ * a row's commit node reveals just that row's actions ([rebase][squash]
+ * while the current branch is armed, [move to] always, [merge][squash
+ * merge] on the receiving branch's row); leaving the row hides them again.
+ * Local branch chips can still be dragged onto a row to move the branch.
  */
 function GraphRowInner({
   row,
@@ -118,6 +120,10 @@ function GraphRowInner({
   // NODE reveals it (row-hover pops nothing)
   const subjectCompact = useUiStore((s) => s.subjectCompact)
   const [nodeHovered, setNodeHovered] = useState(false)
+  // armed-row action buttons are hover-gated: hovering the commit NODE shows
+  // them, leaving the ROW hides them — the node→chip→button corridor stays
+  // inside the row, so nothing flickers mid-transit to a click
+  const [actionsVisible, setActionsVisible] = useState(false)
   // compact mode also removes the author/time/sha meta on every row — no
   // reveal at all (the node-hover peek shows the commit message ONLY).
   // display:none, not opacity: hidden-but-present meta would eat the corridor
@@ -209,6 +215,11 @@ function GraphRowInner({
   // squash collapses the armed branch's tip DOWN TO this row: the target
   // must be an ancestor of the tip, else there is nothing to collapse
   const squashValid = !armed || containsCommit(armed.tipSha, row.sha)
+  // does this row offer ANY hover-revealed action? drives the wrapper (and
+  // the node's hover hint) so an armed selection paints zero buttons until
+  // the user actually hovers a node
+  const hasRowActions =
+    showRebase || (showSquash && squashValid) || showMove || (!!mergeIntoBranch && !mergeNoop)
 
   const onDragOver = (e: DragEvent) => {
     if ((!onMoveBranch && !onMoveTag) || !e.dataTransfer.types.includes(DRAG_TYPE)) return
@@ -240,6 +251,7 @@ function GraphRowInner({
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragLeave={() => setDragOver(false)}
+      onMouseLeave={() => setActionsVisible(false)}
     >
       {/* lane node — outlined circle in the lane color; solid when selected;
        *  picking the node ITSELF (vs a ref chip) also grows it 20%.
@@ -248,13 +260,16 @@ function GraphRowInner({
       <div
         className="absolute cursor-pointer"
         style={{ left: x - r - NODE_PAD, top: (ROW_H - 2 * (r + NODE_PAD)) / 2 }}
-        onMouseEnter={() => setNodeHovered(true)}
+        onMouseEnter={() => {
+          setNodeHovered(true)
+          setActionsVisible(true)
+        }}
         onMouseLeave={() => setNodeHovered(false)}
         onClick={(e) => {
           e.stopPropagation()
           onSelect(row.sha)
         }}
-        title={`Select commit ${row.sha.slice(0, 7)}`}
+        title={`Select commit ${row.sha.slice(0, 7)}${hasRowActions ? ' — hover shows this row\u2019s actions' : ''}`}
         data-testid="graph-node"
       >
         <svg
@@ -423,100 +438,106 @@ function GraphRowInner({
         )}
       </div>
 
-      {/* armed-ref target buttons: [rebase] replays the armed current branch
-       * onto this row; [squash] collapses the armed (any local) branch down
-       * to it; [<- move] points any armed ref here. Hover previews draw on
-       * the graph via [data-action-preview]. */}
-      {showRebase && armed && (
-        <button
-          className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
-          title={`Rebase "${armed.name}" onto ${row.sha.slice(0, 7)} — its commits are replayed after this one. Conflicts pause in the staging area.`}
-          onClick={(e) => {
-            e.stopPropagation()
-            onRowAction!('rebase', row.sha)
-          }}
-          data-testid="row-rebase-button"
-          data-action-preview="rebase"
-        >
-          rebase
-        </button>
-      )}
-      {showSquash && armed && squashValid && (
-        <button
-          className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
-          title={
-            armedIsCurrent
-              ? `Squash "${armed.name}" down to ${row.sha.slice(0, 7)} — pick the commits, changes land staged`
-              : `Squash "${armed.name}" down to ${row.sha.slice(0, 7)} — one new commit replaces the segment (no checkout needed)`
-          }
-          onClick={(e) => {
-            e.stopPropagation()
-            onRowAction!('squash', row.sha)
-          }}
-          data-testid="row-squash-button"
-          data-action-preview="squash"
-        >
-          squash
-        </button>
-      )}
-      {showMove && armed && (
-        <button
-          className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-500/25"
-          title={
-            armed.remote
-              ? `Push ${armed.name} to ${row.sha.slice(0, 7)} (moves the remote branch)`
-              : `Move "${armed.name}" to ${row.sha.slice(0, 7)}`
-          }
-          onClick={(e) => {
-            e.stopPropagation()
-            onRowAction!('move', row.sha)
-          }}
-          data-testid="row-move-button"
-          data-action-preview="move"
-        >
-          move to
-        </button>
-      )}
-
-      {/* merge into this row's local branch, from the armed branch — hidden
-       * entirely when the merge can only be a no-op (target already contains
-       * the armed branch); squash merge additionally requires the target to
-       * be checked out (it stages through the worktree) */}
-      {mergeIntoBranch && onRowAction && armedBranch && !mergeNoop && (
-        <>
-          <button
-            className="shrink-0 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-300 hover:bg-sky-500/25"
-            title={
-              mergeIntoBranch === currentBranch
-                ? `Merge "${armedBranch}" into "${mergeIntoBranch}" (fast-forward when possible; conflicts surface in the staging area)`
-                : `Merge "${armedBranch}" into "${mergeIntoBranch}" (fast-forward only — "${mergeIntoBranch}" is not checked out)`
-            }
-            onClick={(e) => {
-              e.stopPropagation()
-              onRowAction('merge', row.sha, mergeIntoBranch)
-            }}
-            data-testid="row-merge-button"
-            data-ghost-preview={row.sha}
-            data-action-preview="merge"
-          >
-            merge
-          </button>
-          {squashMergePossible && (
+      {/* armed-ref target buttons — revealed by hovering the commit node,
+       * hidden again on row leave (actionsVisible): [rebase] replays the
+       * armed current branch onto this row; [squash] collapses the armed
+       * (any local) branch down to it; [move to] points any armed ref here;
+       * [merge]/[squash merge] fold the armed branch into this row's branch.
+       * Hover previews draw on the graph via [data-action-preview]. */}
+      {actionsVisible && armed && hasRowActions && (
+        <div className="flex shrink-0 items-center gap-1.5" data-testid="row-actions">
+          {showRebase && (
             <button
               className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
-              title={`Squash-merge "${armedBranch}" into "${mergeIntoBranch}": stage all of its changes as one — no merge commit; you write the message`}
+              title={`Rebase "${armed.name}" onto ${row.sha.slice(0, 7)} — its commits are replayed after this one. Conflicts pause in the staging area.`}
               onClick={(e) => {
                 e.stopPropagation()
-                onRowAction('squash-merge', row.sha, mergeIntoBranch)
+                onRowAction!('rebase', row.sha)
               }}
-              data-testid="row-squash-merge-button"
-              data-ghost-preview={row.sha}
-              data-action-preview="squash-merge"
+              data-testid="row-rebase-button"
+              data-action-preview="rebase"
             >
-              squash merge
+              rebase
             </button>
           )}
-        </>
+          {showSquash && squashValid && (
+            <button
+              className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
+              title={
+                armedIsCurrent
+                  ? `Squash "${armed.name}" down to ${row.sha.slice(0, 7)} — pick the commits, changes land staged`
+                  : `Squash "${armed.name}" down to ${row.sha.slice(0, 7)} — one new commit replaces the segment (no checkout needed)`
+              }
+              onClick={(e) => {
+                e.stopPropagation()
+                onRowAction!('squash', row.sha)
+              }}
+              data-testid="row-squash-button"
+              data-action-preview="squash"
+            >
+              squash
+            </button>
+          )}
+          {showMove && (
+            <button
+              className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-500/25"
+              title={
+                armed.remote
+                  ? `Push ${armed.name} to ${row.sha.slice(0, 7)} (moves the remote branch)`
+                  : `Move "${armed.name}" to ${row.sha.slice(0, 7)}`
+              }
+              onClick={(e) => {
+                e.stopPropagation()
+                onRowAction!('move', row.sha)
+              }}
+              data-testid="row-move-button"
+              data-action-preview="move"
+            >
+              move to
+            </button>
+          )}
+
+          {/* merge into this row's local branch, from the armed branch — hidden
+           * entirely when the merge can only be a no-op (target already contains
+           * the armed branch); squash merge additionally requires the target to
+           * be checked out (it stages through the worktree) */}
+          {mergeIntoBranch && armedBranch && !mergeNoop && (
+            <>
+              <button
+                className="shrink-0 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-300 hover:bg-sky-500/25"
+                title={
+                  mergeIntoBranch === currentBranch
+                    ? `Merge "${armedBranch}" into "${mergeIntoBranch}" (fast-forward when possible; conflicts surface in the staging area)`
+                    : `Merge "${armedBranch}" into "${mergeIntoBranch}" (fast-forward only — "${mergeIntoBranch}" is not checked out)`
+                }
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRowAction!('merge', row.sha, mergeIntoBranch)
+                }}
+                data-testid="row-merge-button"
+                data-ghost-preview={row.sha}
+                data-action-preview="merge"
+              >
+                merge
+              </button>
+              {squashMergePossible && (
+                <button
+                  className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
+                  title={`Squash-merge "${armedBranch}" into "${mergeIntoBranch}": stage all of its changes as one — no merge commit; you write the message`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRowAction!('squash-merge', row.sha, mergeIntoBranch)
+                  }}
+                  data-testid="row-squash-merge-button"
+                  data-ghost-preview={row.sha}
+                  data-action-preview="squash-merge"
+                >
+                  squash merge
+                </button>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       {/* left mode: the subject + meta ride in this right-of-node flow
