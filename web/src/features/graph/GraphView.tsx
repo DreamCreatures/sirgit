@@ -781,10 +781,13 @@ function ActionPopup({
   )?.getBoundingClientRect?.() ?? null
   let left = Math.max(rect.left + 8, anchorEl ? anchorEl.left : laneXBased)
   if (left + popupW > rect.right - 8) left = Math.max(rect.left + 8, rect.right - 8 - popupW)
-  // probe frame (popupW=0): constrain only to the full container so the
-  // measured width is the NATURAL single-row width — constraining to the
-  // anchor's remaining space would bake the wrap in and it'd never unwrap
-  const maxW = popupW ? rect.right - 8 - left : rect.width - 16
+  // maxWidth is PLACEMENT-INDEPENDENT (full container width): the measured
+  // popupW is then always the natural single-row width. Deriving it from
+  // `left` instead would feedback-loop — an anchor near the right edge (or a
+  // stale popupW kept across same-row re-selections, since the popup is
+  // keyed by sha) clamps the width, the wrap bakes into the measurement,
+  // and the bar can never unwrap.
+  const maxW = rect.width - 16
 
   return createPortal(
     <div
