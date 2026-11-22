@@ -111,12 +111,18 @@ function GraphRowInner({
 }: GraphRowProps) {
   const color = laneColor(lane)
   const x = originX + laneX(lane)
-  // compact mode fades every subject except HEAD's; the row hover peeks at it
+  // compact mode fades every subject except HEAD's; hovering the row's commit
+  // NODE reveals it (row-hover pops nothing)
   const subjectCompact = useUiStore((s) => s.subjectCompact)
-  // compact mode also fades the author/time/sha meta on every row (subject
-  // keeps the HEAD exception — it anchors the view)
-  const metaHide = subjectCompact ? ' opacity-0 transition-opacity duration-100 group-hover:opacity-100' : ''
-  const subjectHide = subjectCompact && !isHead ? ' opacity-0 transition-opacity duration-100 group-hover:opacity-100' : ''
+  const [nodeHovered, setNodeHovered] = useState(false)
+  // compact mode also fades the author/time/sha meta on every row — no reveal
+  // at all: the node-hover peek shows the commit message ONLY (user rule)
+  const metaHide = subjectCompact ? ' opacity-0 transition-opacity duration-100' : ''
+  const subjectHide = subjectCompact && !isHead
+    ? nodeHovered
+      ? ' opacity-100 transition-opacity duration-100'
+      : ' opacity-0 transition-opacity duration-100'
+    : ''
   // tree-mode mirror: side rows face the trunk — chips + action buttons sit
   // in the corridor between the node and the trunk lane, subject/meta fan
   // outward (away from the trunk), like a family tree's labels
@@ -235,6 +241,8 @@ function GraphRowInner({
       <div
         className="absolute cursor-pointer"
         style={{ left: x - r - NODE_PAD, top: (ROW_H - 2 * (r + NODE_PAD)) / 2 }}
+        onMouseEnter={() => setNodeHovered(true)}
+        onMouseLeave={() => setNodeHovered(false)}
         onClick={(e) => {
           e.stopPropagation()
           onSelect(row.sha)
