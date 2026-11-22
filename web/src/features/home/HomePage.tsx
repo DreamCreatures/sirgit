@@ -312,7 +312,11 @@ export default function HomePage() {
               <Trash2 className="h-3 w-3" /> Clear
             </button>
           </div>
-          <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-xl border border-zinc-800">
+          {/* capped at 5 visible rows (~41px each) — scroll for the rest */}
+          <ul
+            className="scroll-thin divide-y divide-zinc-800/60 overflow-y-auto rounded-xl border border-zinc-800"
+            style={{ maxHeight: 205 }}
+          >
             {repos.map((r) => (
               <RepoListRow key={r} path={r} onOpen={() => openFromList(r)} onRemove={() => removeRepo(r)} testid="repo-row" />
             ))}
