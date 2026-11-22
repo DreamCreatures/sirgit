@@ -19,7 +19,7 @@ pub struct QuickStatus {
     pub git_root_path: Option<String>,
     #[serde(rename = "gitDir")]
     pub git_dir: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "subRepos")]
     pub sub_repos: Option<Vec<String>>,
 }
 
@@ -27,6 +27,8 @@ fn is_git_repo(path: &Path) -> bool {
     path.join(".git").exists()
 }
 
+/// Immediate git-repo children of a directory, as ABSOLUTE paths (the home
+/// page imports them verbatim into its repository list).
 fn find_sub_repos(path: &Path) -> Vec<String> {
     let mut found = Vec::new();
     let Ok(entries) = std::fs::read_dir(path) else {
@@ -35,9 +37,7 @@ fn find_sub_repos(path: &Path) -> Vec<String> {
     for entry in entries.flatten() {
         let p = entry.path();
         if p.is_dir() && is_git_repo(&p) {
-            if let Some(s) = p.file_name().and_then(|n| n.to_str()) {
-                found.push(s.to_string());
-            }
+            found.push(p.to_string_lossy().into_owned());
         }
     }
     found.sort();
