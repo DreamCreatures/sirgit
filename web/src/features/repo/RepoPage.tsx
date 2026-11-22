@@ -641,10 +641,12 @@ export default function RepoPage() {
                 <AlignStartVertical className="h-3.5 w-3.5" />
               )
             }
+            // the tooltip names what clicking SWITCHES TO (like the eye
+            // toggle), not the current mode
             title={
               laneMode === 'tree'
-                ? 'Tree layout (trunk centered, branches both sides) — click for left-anchored'
-                : 'Left layout (trunk leftmost, branches right) — click for centered tree'
+                ? 'Left layout (trunk leftmost, branches right) — click to switch'
+                : 'Tree layout (trunk centered, branches both sides) — click to switch'
             }
             onClick={toggleLaneMode}
             testid="toggle-lanemode"
