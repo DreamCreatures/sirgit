@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Resizer from '../../ui/Resizer'
 import { useQuery } from '@tanstack/react-query'
 import { X, Copy, FileText } from 'lucide-react'
@@ -11,7 +11,7 @@ import DiffView from './DiffView'
 export default function CommitDetail({ path }: { path: string }) {
   const selectedSha = useUiStore((s) => s.detailsSha)
   const setDetailsSha = useUiStore((s) => s.setDetailsSha)
-  const width = useUiStore((s) => s.commitDetailWidth)
+  const storedWidth = useUiStore((s) => s.commitDetailWidth)
   const setWidth = useUiStore((s) => s.setCommitDetailWidth)
   const toast = useUiStore((s) => s.toast)
 
@@ -20,6 +20,24 @@ export default function CommitDetail({ path }: { path: string }) {
     queryFn: () => api.commitDetail(path, selectedSha!),
     enabled: !!selectedSha,
   })
+
+  // responsive width: tablets/phones get the drawer FULL-width; desktops
+  // START at half the viewport on every open (user: "I always have to expand
+  // it to max to see the changes clearer") — a hand-dragged wider width is
+  // respected, and after opening the drawer can still be dragged narrower
+  const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth))
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  useEffect(() => {
+    if (!selectedSha || vw < 768) return
+    const half = Math.min(Math.round(vw * 0.5), 820)
+    if (storedWidth < half) setWidth(half)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- boost on each open only
+  }, [selectedSha])
+  const width = vw < 768 ? vw : storedWidth
 
   if (!selectedSha) return null
 

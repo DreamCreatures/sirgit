@@ -46,6 +46,9 @@ export default function RepoPage() {
     fetchedOnce.current = false
     useUiStore.getState().select(null)
     useUiStore.getState().clearScrollTo()
+    // stashes always start collapsed on page entry (user rule — even when
+    // the stack is non-empty)
+    useUiStore.setState({ stashOpen: false })
     // visiting registers in Recent — covers direct-URL entry, so the repo you
     // just backed from is always in the home page's recent list
     useUiStore.getState().addRecentRepo(path)
