@@ -261,6 +261,33 @@ export default function HomePage() {
         {busy && busy !== 'clone' && <p className="mt-2 text-xs text-zinc-500">checking {busy}…</p>}
       </section>
 
+      {/* repositories — the growing union of every imported root + clones;
+       * sits above Clone so a finished clone is right there when you come back */}
+      {repos.length > 0 ? (
+        <section data-testid="repo-list">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-zinc-400">Repositories</h2>
+            <button
+              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              onClick={clearRepos}
+              title="Clear the whole repository list"
+              data-testid="clear-repos"
+            >
+              <Trash2 className="h-3 w-3" /> Clear
+            </button>
+          </div>
+          <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-xl border border-zinc-800">
+            {repos.map((r) => (
+              <RepoListRow key={r} path={r} onOpen={() => openFromList(r)} onRemove={() => removeRepo(r)} testid="repo-row" />
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <p className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-800 px-4 py-6 text-sm text-zinc-500">
+          <Plus className="h-4 w-4" /> No repositories yet — add a working directory above to import its repos.
+        </p>
+      )}
+
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
         <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-400">
           <Download className="h-4 w-4" /> Clone a repository
@@ -290,32 +317,6 @@ export default function HomePage() {
           {busy === 'clone' && <p className="text-xs text-zinc-500">cloning…</p>}
         </div>
       </section>
-
-      {/* repositories — the growing union of every imported root + clones */}
-      {repos.length > 0 ? (
-        <section data-testid="repo-list">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-zinc-400">Repositories</h2>
-            <button
-              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-              onClick={clearRepos}
-              title="Clear the whole repository list"
-              data-testid="clear-repos"
-            >
-              <Trash2 className="h-3 w-3" /> Clear
-            </button>
-          </div>
-          <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-xl border border-zinc-800">
-            {repos.map((r) => (
-              <RepoListRow key={r} path={r} onOpen={() => openFromList(r)} onRemove={() => removeRepo(r)} testid="repo-row" />
-            ))}
-          </ul>
-        </section>
-      ) : (
-        <p className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-800 px-4 py-6 text-sm text-zinc-500">
-          <Plus className="h-4 w-4" /> No repositories yet — add a working directory above to import its repos.
-        </p>
-      )}
 
       {/* recent — last visited, top 10 */}
       {recentRepos.length > 0 && (
