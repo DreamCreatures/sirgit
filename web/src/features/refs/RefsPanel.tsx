@@ -12,7 +12,7 @@ import { friendlyError } from '../../lib/gitErrors'
  * Left panel: branches, remote branches, tags — with checkout, delete,
  * create-branch/tag, remote management, and per-remote fetch (click a remote
  * row). Repo-wide Fetch/Pull live in the top header only. The panel header
- * carries the branch-list filter (all | local | recent) — SIDEBAR-ONLY:
+ * carries the branch-list filter (all | track | untrack | recent) — SIDEBAR-ONLY:
  * the graph map always shows every branch.
  */
 export default function RefsPanel({ path }: { path: string }) {
@@ -52,10 +52,25 @@ export default function RefsPanel({ path }: { path: string }) {
   const refOpBusy = opMut.isPending
 
   /** rename-prompt runner: rejects on failure (AppDialog shows the error
-   *  inline) and marks the global busy guard; refreshes on success */
+   * inline) and marks the global busy guard; refreshes on success */
   const dialogOp = (fn: () => Promise<unknown>): Promise<unknown> => {
     useUiStore.getState().beginOp('Working')
     return fn().then(invalidate).finally(() => useUiStore.getState().endOp())
+  }
+
+  /** network-op runner for dialog onConfirms (remote-branch delete): returns
+   * the SETTLED promise so the dialog keeps its spinner until the push lands;
+   * failure rejects → AppDialog shows it inline (no duplicate toast) */
+  const netDialogOp = (fn: () => Promise<{ opId: string }>, label: string): Promise<unknown> => {
+    useUiStore.getState().beginOp(label)
+    useUiStore.getState().setNetBusy(label)
+    return fn()
+      .then(({ opId }) => pollOp(opId))
+      .then(invalidate)
+      .finally(() => {
+        useUiStore.getState().setNetBusy(null)
+        useUiStore.getState().endOp()
+      })
   }
 
   const netMut = useMutation({
@@ -294,7 +309,20 @@ export default function RefsPanel({ path }: { path: string }) {
                   opMut.mutate(() => api.checkout(path, localName))
                 }
               }}
-              onDelete={undefined}
+              onDelete={() => {
+                // same op as the graph-side remote delete (SelectionActions):
+                // git push <remote> --delete <branch> — local branches stay
+                useUiStore.getState().setDialog({
+                  kind: 'confirm',
+                  danger: true,
+                  title: `Delete ${b.name}`,
+                  message:
+                    `Deletes the branch on the remote — git push ${remote} --delete ${localName}.\n\n` +
+                    'Local branches (tracking or not) are untouched; commits unique to the remote branch become unreachable there. The remote refuses if this is its default branch.',
+                  confirmLabel: 'Delete',
+                  onConfirm: () => netDialogOp(() => api.push(path, remote, `:refs/heads/${localName}`), `Delete ${b.name}`),
+                })
+              }}
             />
           )
         })}
