@@ -181,6 +181,10 @@ export function SelectionActions({
                 const rb = rowRefs.find((r) => r.type === 'remote-branch')!
                 const remote = rb.name.split('/')[0]
                 const local = rb.name.slice(remote.length + 1)
+                if (localBranchNames.includes(local)) {
+                  run(() => checkoutRemote(local, remote))
+                  return
+                }
                 useUiStore.getState().setDialog({
                   kind: 'confirm',
                   title: 'Checkout remote branch',
@@ -347,24 +351,38 @@ export function SelectionActions({
       {/* remote branch actions (origin/x chip selected) */}
       {selRemote && !selBranch && !selTag && (
         <>
-          <button
-            className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
-            title={`Create local branch "${selRemote.name.split('/').slice(1).join('/')}" tracking ${selRemote.name} and check it out`}
-            onClick={() => {
-              const remote = selRemote.name.split('/')[0]
-              const local = selRemote.name.slice(remote.length + 1)
-              useUiStore.getState().setDialog({
-                kind: 'confirm',
-                title: 'Checkout remote branch',
-                message: `Create local branch "${local}" tracking ${selRemote.name} and check it out?`,
-                confirmLabel: 'Checkout',
-                // returns the promise → the dialog spins until the checkout lands
-                onConfirm: () => runAsync(() => checkoutRemote(local, remote)),
-              })
-            }}
-          >
-            <CornerUpLeft className="h-3.5 w-3.5" /> Checkout
-          </button>
+          {/* checkout only when it would do something: hidden when the local
+           *  branch it resolves to is the one already checked out */}
+          {selRemote.name.slice(selRemote.name.indexOf('/') + 1) !== currentBranch && (
+            <button
+              className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
+              title={
+                localBranchNames.includes(selRemote.name.slice(selRemote.name.indexOf('/') + 1))
+                  ? `Check out local branch "${selRemote.name.slice(selRemote.name.indexOf('/') + 1)}"`
+                  : `Create local branch "${selRemote.name.split('/').slice(1).join('/')}" tracking ${selRemote.name} and check it out`
+              }
+              onClick={() => {
+                const remote = selRemote.name.split('/')[0]
+                const local = selRemote.name.slice(remote.length + 1)
+                // local branch exists → plain switch, immediate (same as a local
+                // chip's double-click); only the create-tracking case confirms
+                if (localBranchNames.includes(local)) {
+                  run(() => checkoutRemote(local, remote))
+                  return
+                }
+                useUiStore.getState().setDialog({
+                  kind: 'confirm',
+                  title: 'Checkout remote branch',
+                  message: `Create local branch "${local}" tracking ${selRemote.name} and check it out?`,
+                  confirmLabel: 'Checkout',
+                  // returns the promise → the dialog spins until the checkout lands
+                  onConfirm: () => runAsync(() => checkoutRemote(local, remote)),
+                })
+              }}
+            >
+              <CornerUpLeft className="h-3.5 w-3.5" /> Checkout
+            </button>
+          )}
           {currentBranch && (
             <button
               className={`${btn} bg-violet-500/15 text-violet-300 hover:bg-violet-500/25`}

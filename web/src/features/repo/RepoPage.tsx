@@ -423,16 +423,19 @@ export default function RepoPage() {
     }
   }
 
-  // double-click checkout on branch chips (same op as the action-bar button)
-  const checkoutBranch = (name: string) => {
+  // double-click checkout on branch chips (same op as the action-bar button);
+  // trackFrom set → the branch is CREATED tracking that remote ref first
+  const checkoutBranch = (name: string, trackFrom?: string) => {
     useUiStore.getState().beginOp('Checkout')
     void api
-      .checkout(path, name)
+      .checkout(path, name, trackFrom)
       .then(() => {
         toast({ kind: 'success', title: `Checked out ${name}` })
         // bring the new HEAD into view — the tip may sit far off-screen
         const sha =
-          refs?.branches.find((b) => b.name === name)?.sha ?? refs?.tags.find((t) => t.name === name)?.sha
+          refs?.branches.find((b) => b.name === name)?.sha ??
+          (trackFrom ? refs?.remoteBranches.find((r) => r.name === trackFrom)?.sha : undefined) ??
+          refs?.tags.find((t) => t.name === name)?.sha
         if (sha) useUiStore.getState().requestScrollTo(sha)
         refreshAll()
       })
@@ -442,6 +445,28 @@ export default function RepoPage() {
         refreshAll()
       })
       .finally(() => useUiStore.getState().endOp())
+  }
+
+  // remote chip double-click / popup Checkout: switch to the local branch
+  // when it already exists (a plain checkout — no dialog needed), confirm
+  // only the create-tracking case, no-op when that branch is already current
+  const checkoutRemoteRef = (remoteRef: string) => {
+    const local = remoteRef.slice(remoteRef.indexOf('/') + 1)
+    if (local === currentBranch) {
+      toast({ kind: 'info', title: `Already on ${local}`, detail: `${remoteRef} tracks the checked-out branch` })
+      return
+    }
+    if (refs?.branches.some((b) => b.name === local)) {
+      checkoutBranch(local)
+      return
+    }
+    useUiStore.getState().setDialog({
+      kind: 'confirm',
+      title: 'Checkout remote branch',
+      message: `Create local branch "${local}" tracking ${remoteRef} and check it out?`,
+      confirmLabel: 'Checkout',
+      onConfirm: () => checkoutBranch(local, remoteRef),
+    })
   }
 
   const repoName = path.split('/').filter(Boolean).pop() ?? path
@@ -533,7 +558,9 @@ export default function RepoPage() {
               currentBranch={currentBranch}
               selectedRef={selectedRef}
               onNodeClick={handleNodeClick}
-              onCheckout={checkoutBranch}
+              onCheckout={(name) =>
+            refs?.remoteBranches.some((r) => r.name === name) ? checkoutRemoteRef(name) : checkoutBranch(name)
+          }
               armedRef={armedRef}
               onRowAction={onRowAction}
               onMoveBranch={moveBranchTo}

@@ -296,7 +296,7 @@ function GraphRowInner({
               key={rf.name}
               icon={<GitBranch className="h-3 w-3" />}
               label={abbrevRemoteRef(rf.name)}
-              title={rf.name}
+              title={`${rf.name} — double-click to check out`}
               className={
                 'bg-sky-400/10 text-sky-300/80 border-sky-400/20' +
                 (selectedRef?.kind === 'remote-branch' && selectedRef.name === rf.name ? ' ring-1 ring-sky-400/70' : '')
@@ -305,6 +305,7 @@ function GraphRowInner({
               sha={row.sha}
               refKind="remote-branch"
               refName={rf.name}
+              onCheckout={onCheckout ? () => onCheckout(rf.name) : undefined}
             />
           ),
         )}
