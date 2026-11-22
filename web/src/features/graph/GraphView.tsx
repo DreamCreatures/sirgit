@@ -82,6 +82,7 @@ export default function GraphView({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportH, setViewportH] = useState(600)
+  const [viewportW, setViewportW] = useState(1200)
   const rafRef = useRef(0)
 
   const onScroll = useCallback(() => {
@@ -95,9 +96,13 @@ export default function GraphView({
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => setViewportH(el.clientHeight))
+    const ro = new ResizeObserver(() => {
+      setViewportH(el.clientHeight)
+      setViewportW(el.clientWidth)
+    })
     ro.observe(el)
     setViewportH(el.clientHeight)
+    setViewportW(el.clientWidth)
     return () => ro.disconnect()
   }, [])
 
@@ -118,6 +123,14 @@ export default function GraphView({
   const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
 
   const visibleRows = useMemo(() => ordered.slice(start, end), [ordered, start, end])
+
+  // tree layout: center the lane band when the viewport has spare width (e.g.
+  // collapsed refs panel) — the trunk already sits mid-band thanks to the
+  // alternating lane assignment, so the checked-out branch lands near the
+  // viewport middle instead of hugging the left edge. Narrow viewport → 0 →
+  // left-anchored exactly as before.
+  const bandW = laneX(laneLayout.laneCount) + 20
+  const originX = Math.max(0, Math.floor((viewportW - bandW) / 2))
 
   // --- hover preview of a row action (ungit-style): the commit run between
   // the armed subject's tip and the hovered target (first-parent walk, the
@@ -194,10 +207,11 @@ export default function GraphView({
          *  layout shift either way. */}
         {showGhost && (
           <div
-            className="pointer-events-none absolute left-0"
+            className="pointer-events-none absolute"
             style={{
               top: ghostTop,
-              width: Math.max(120, laneX(laneLayout.laneCount) + 20),
+              left: originX,
+              width: Math.max(120, laneX(laneLayout.laneCount) + 20 + originX),
               height: 2 * ROW_H,
             }}
             data-testid="ghost-commit"
@@ -227,7 +241,7 @@ export default function GraphView({
             </svg>
           </div>
         )}
-        <GraphEdges start={start} end={end} offset={ghostOffset} dim={spotlight} />
+        <GraphEdges start={start} end={end} offset={ghostOffset} dim={spotlight} originX={originX} />
         {visibleRows.map((row, i) => {
           const idx = start + i
           return (
@@ -237,6 +251,7 @@ export default function GraphView({
               index={idx}
               topOffset={ghostOffset}
               lane={laneLayout.lanes.get(row.sha) ?? 0}
+              originX={originX}
               refs={refBySha.get(row.sha)}
               remoteTags={remoteTags}
               remoteTagRemote={remoteTagRemote}
@@ -255,7 +270,7 @@ export default function GraphView({
           )
         })}
         {preview && (
-          <PreviewOverlay preview={preview} run={previewRun} ordered={ordered} lanes={laneLayout.lanes} topOffset={ghostOffset} />
+          <PreviewOverlay preview={preview} run={previewRun} ordered={ordered} lanes={laneLayout.lanes} topOffset={ghostOffset} originX={originX} />
         )}
         {renderActions && selectedSha && detailsSha !== selectedSha && ordered.some((r) => r.sha === selectedSha) && (
           <ActionPopup
@@ -264,6 +279,7 @@ export default function GraphView({
             index={ordered.findIndex((r) => r.sha === selectedSha)}
             topOffset={ghostOffset}
             laneCount={laneLayout.laneCount}
+            originX={originX}
             scrollRef={scrollRef}
             scrollTop={scrollTop}
             onDismiss={() => useUiStore.getState().select(null)}
@@ -303,6 +319,7 @@ const RowWrapper = memo(function RowWrapper({
   index,
   topOffset,
   lane,
+  originX,
   refs,
   remoteTags,
   remoteTagRemote,
@@ -323,6 +340,8 @@ const RowWrapper = memo(function RowWrapper({
   /** extra top offset (the ghost next-commit row shifts everything down) */
   topOffset: number
   lane: number
+  /** lane-band centering shift (tree layout) */
+  originX: number
   refs?: RefInfo[]
   remoteTags?: string[]
   remoteTagRemote?: string | null
@@ -348,6 +367,7 @@ const RowWrapper = memo(function RowWrapper({
       <GraphRow
         row={row}
         lane={lane}
+        originX={originX}
         refs={refs}
         remoteTags={remoteTags}
         remoteTagRemote={remoteTagRemote}
@@ -387,16 +407,20 @@ function PreviewOverlay({
   ordered,
   lanes,
   topOffset,
+  originX,
 }: {
   preview: { op: 'move' | 'rebase' | 'squash' | 'merge' | 'squash-merge'; targetSha: string; subjectTipSha: string; subjectBranch: string }
   run: string[]
   ordered: import('../../lib/types').CommitRow[]
   lanes: Map<string, number>
   topOffset: number
+  /** lane-band centering shift (tree layout) — every x is laneX + originX */
+  originX: number
 }) {
   const idxOf = (sha: string) => ordered.findIndex((r) => r.sha === sha)
   const laneOf = (sha: string) => lanes.get(sha) ?? 0
   const colorOf = (sha: string) => laneColor(laneOf(sha))
+  const lx = (lane: number) => originX + laneX(lane)
   /** centered-on-node dashed ring (r 16 covers the 8/10/15 node radii) */
   const Ring = ({ sha, stroke, dashed = true, opacity = 0.9 }: { sha: string; stroke: string; dashed?: boolean; opacity?: number }) => {
     const idx = idxOf(sha)
@@ -404,7 +428,7 @@ function PreviewOverlay({
     return (
       <div
         className="pointer-events-none absolute"
-        style={{ left: laneX(laneOf(sha)) - 18, top: idx * ROW_H + topOffset + (ROW_H - 36) / 2, width: 36, height: 36 }}
+        style={{ left: lx(laneOf(sha)) - 18, top: idx * ROW_H + topOffset + (ROW_H - 36) / 2, width: 36, height: 36 }}
         data-testid="preview-ring"
       >
         <svg width={36} height={36}>
@@ -442,7 +466,7 @@ function PreviewOverlay({
           {stack.map((sha, i) => {
             // circle i sits i rows above the target; clamp at the reserved top slot
             const row = Math.max(0, targetIdx - (i + 1))
-            const cx = laneX(targetLane)
+            const cx = lx(targetLane)
             const cy = row * ROW_H + topOffset + ROW_H / 2
             return (
               <div key={sha}>
@@ -456,7 +480,7 @@ function PreviewOverlay({
                   </svg>
                 </div>
                 {i < stack.length - 1 && (
-                  <svg className="pointer-events-none absolute left-0" style={{ top: 0 }} width={Math.max(120, laneX(lanes.size) + 20)} height={cy + ROW_H}>
+                  <svg className="pointer-events-none absolute left-0" style={{ top: 0 }} width={Math.max(120, lx(lanes.size) + 20)} height={cy + ROW_H}>
                     <line x1={cx} y1={cy + 7} x2={cx} y2={cy + ROW_H - 7} stroke={targetColor} strokeWidth={1.5} strokeDasharray="2 5" opacity={0.4} />
                   </svg>
                 )}
@@ -466,7 +490,7 @@ function PreviewOverlay({
           {capped && (
             <div
               className="pointer-events-none absolute rounded-full border border-violet-500/40 bg-violet-500/10 px-1.5 text-[10px] text-violet-300"
-              style={{ left: laneX(targetLane) + 14, top: Math.max(0, targetIdx - PREVIEW_CAP) * ROW_H + topOffset + ROW_H / 2 - 8 }}
+              style={{ left: lx(targetLane) + 14, top: Math.max(0, targetIdx - PREVIEW_CAP) * ROW_H + topOffset + ROW_H / 2 - 8 }}
             >
               +{run.length - PREVIEW_CAP} more
             </div>
@@ -480,13 +504,13 @@ function PreviewOverlay({
       {preview.op === 'squash' && (
         <div
           className="pointer-events-none absolute left-0"
-          style={{ top: ghostTop, width: Math.max(120, laneX(lanes.size) + 20), height: 2 * ROW_H }}
+          style={{ top: ghostTop, width: Math.max(120, lx(lanes.size) + 20), height: 2 * ROW_H }}
           data-testid="preview-ghost"
         >
           <svg width="100%" height={2 * ROW_H}>
-            {ghostIdx > 0 && <circle cx={laneX(targetLane)} cy={ROW_H / 2} r={15} fill="#18181b" />}
-            <circle cx={laneX(targetLane)} cy={ROW_H / 2} r={10} fill="none" stroke={VIOLET} strokeWidth={2} strokeDasharray="3 3" opacity={0.8} />
-            <line x1={laneX(targetLane)} y1={ROW_H / 2 + 10} x2={laneX(targetLane)} y2={1.5 * ROW_H} stroke={VIOLET} strokeWidth={2} strokeDasharray="2 5" opacity={0.5} />
+            {ghostIdx > 0 && <circle cx={lx(targetLane)} cy={ROW_H / 2} r={15} fill="#18181b" />}
+            <circle cx={lx(targetLane)} cy={ROW_H / 2} r={10} fill="none" stroke={VIOLET} strokeWidth={2} strokeDasharray="3 3" opacity={0.8} />
+            <line x1={lx(targetLane)} y1={ROW_H / 2 + 10} x2={lx(targetLane)} y2={1.5 * ROW_H} stroke={VIOLET} strokeWidth={2} strokeDasharray="2 5" opacity={0.5} />
           </svg>
         </div>
       )}
@@ -505,9 +529,9 @@ function PreviewOverlay({
           const tipIdx = idxOf(preview.subjectTipSha)
           if (intoIdx < 0 || tipIdx < 0) return null
           // ghost circle center — mirrors GraphView's ghost anchoring
-          const gx = laneX(laneOf(preview.targetSha))
+          const gx = lx(laneOf(preview.targetSha))
           const gy = (intoIdx <= 0 ? 0 : (intoIdx - 1) * ROW_H + topOffset) + ROW_H / 2
-          const tx = laneX(laneOf(preview.subjectTipSha))
+          const tx = lx(laneOf(preview.subjectTipSha))
           const ty = tipIdx * ROW_H + topOffset + ROW_H / 2
           const left = Math.min(gx, tx) - 24
           const top = Math.min(gy, ty) - 24
@@ -551,6 +575,7 @@ function ActionPopup({
   index,
   topOffset,
   laneCount,
+  originX,
   scrollRef,
   scrollTop,
   onDismiss,
@@ -561,6 +586,8 @@ function ActionPopup({
   /** the ghost next-commit row shifts row positions down */
   topOffset: number
   laneCount: number
+  /** lane-band centering shift (tree layout) */
+  originX: number
   scrollRef: React.RefObject<HTMLDivElement | null>
   scrollTop: number
   onDismiss: () => void
@@ -604,7 +631,7 @@ function ActionPopup({
 
   // horizontal: just right of the selected branch chip; when that would
   // overflow the container, overlay the branch name; last resort = node side
-  const laneXBased = rect.left + Math.max(60, laneX(Math.min(laneCount, 6)) + 8)
+  const laneXBased = rect.left + originX + Math.max(60, laneX(Math.min(laneCount, 6)) + 8)
   const rowEl = container.querySelector(`[data-sha="${sha}"]`)
   const chips = rowEl ? [...rowEl.querySelectorAll('[data-testid="graph-ref-chip"]')] : []
   const lastChip = chips.length ? chips[chips.length - 1].getBoundingClientRect() : null

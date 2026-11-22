@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { GitBranch, GitMerge, Tag, Globe, Plus, Trash2, Download, ChevronDown, ChevronRight, CloudDownload, Loader2, Pencil} from 'lucide-react'
+import { GitBranch, GitMerge, Tag, Globe, Plus, Trash2, ChevronDown, ChevronRight, Loader2, Pencil, Filter } from 'lucide-react'
 import { api, pollOp } from '../../lib/client'
 import Resizer from '../../ui/Resizer'
 import { useRefs } from '../../api/hooks'
@@ -9,14 +9,17 @@ import { friendlyError } from '../../lib/gitErrors'
 
 /**
  * Left panel: branches, remote branches, tags — with checkout, delete,
- * create-branch/tag, remote management, and fetch/pull actions (push lives
- * on the selected branch's action bar in the graph).
+ * create-branch/tag, remote management, and per-remote fetch (click a remote
+ * row). Repo-wide Fetch/Pull live in the top header only; this panel's header
+ * carries the non-tracking-branch graph filter instead.
  */
 export default function RefsPanel({ path }: { path: string }) {
   const width = useUiStore((s2) => s2.refsPanelWidth)
   const collapsed = useUiStore((s2) => s2.refsPanelCollapsed)
   const setWidth = useUiStore((s2) => s2.setRefsPanelWidth)
   const setCollapsed = useUiStore((s2) => s2.setRefsPanelCollapsed)
+  const hideNonTracking = useUiStore((s2) => s2.hideNonTracking)
+  const setHideNonTracking = useUiStore((s2) => s2.setHideNonTracking)
   const { data } = useRefs(path)
   const toast = useUiStore((s) => s.toast)
   const qc = useQueryClient()
@@ -108,22 +111,23 @@ export default function RefsPanel({ path }: { path: string }) {
     >
       <Resizer side="left" currentWidth={width} onResize={setWidth} />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-3">
-      {/* actions */}
+      {/* header: the non-tracking graph filter + collapse. The old Fetch/Pull
+       * buttons here duplicated the top header's (same testid twice) — the
+       * header ones are canonical now; per-remote fetch is a remote-row click */}
       <div className="mb-3 flex items-center gap-1.5">
         <button
-          className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs ${netBusy ? 'cursor-not-allowed bg-zinc-800/60 text-zinc-500' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'}`}
-          title="Fetch from all remotes"
-          onClick={() => !netBusy && netMut.mutate({ fn: () => api.fetch(path), label: 'Fetch' })}
-          data-testid="fetch-button"
+          className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs ${
+            hideNonTracking ? 'bg-emerald-500/15 text-emerald-300' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+          }`}
+          onClick={() => setHideNonTracking(!hideNonTracking)}
+          title={
+            hideNonTracking
+              ? 'Showing all branches — click to hide branches with no remote twin'
+              : 'Hide branches with no remote twin (no <remote>/<branch>) — their unique commits leave the graph; this list keeps them'
+          }
+          data-testid="toggle-nontracking"
         >
-          {netBusy === 'Fetch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="h-3.5 w-3.5" />} Fetch
-        </button>
-        <button
-          className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs ${netBusy ? 'cursor-not-allowed bg-zinc-800/60 text-zinc-500' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'}`}
-          title="Pull (fetch + fast-forward)"
-          onClick={() => !netBusy && netMut.mutate({ fn: () => api.pull(path), label: 'Pull' })}
-        >
-          {netBusy === 'Pull' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Pull
+          <Filter className="h-3.5 w-3.5" />
         </button>
         <button
           className="ml-auto rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"

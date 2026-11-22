@@ -4,6 +4,7 @@ import type { CommitRow, RefInfo } from '../../lib/types'
 import { relTime } from '../../lib/time'
 import { abbrevRemote, abbrevRemoteRef } from '../../lib/remoteLabel'
 import { useGraphStore } from '../../state/graphStore'
+import { useUiStore } from '../../state/uiStore'
 import { ROW_H, laneX } from './GraphView'
 import { laneColor } from './GraphEdges'
 
@@ -33,6 +34,8 @@ function containsCommit(fromSha: string, ancestorSha: string): boolean {
 interface GraphRowProps {
   row: CommitRow
   lane: number
+  /** horizontal shift of the lane band (tree layout centers it in the viewport) */
+  originX?: number
   refs?: RefInfo[]
   /** tag names known to be on the remote — pushed tags render as <remote-abbrev>/<tag> */
   remoteTags?: string[]
@@ -84,6 +87,7 @@ const NODE_PAD = 8
 function GraphRowInner({
   row,
   lane,
+  originX = 0,
   refs,
   remoteTags,
   remoteTagRemote,
@@ -100,7 +104,9 @@ function GraphRowInner({
   onMoveTag,
 }: GraphRowProps) {
   const color = laneColor(lane)
-  const x = laneX(lane)
+  const x = originX + laneX(lane)
+  // compact mode fades every subject except HEAD's; the row hover peeks at it
+  const subjectCompact = useUiStore((s) => s.subjectCompact)
   // the working branch's tip (HEAD) reads at 50% bigger than branch nodes;
   // plain commits stay smallest
   const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
@@ -412,8 +418,15 @@ function GraphRowInner({
         </>
       )}
 
-      {/* subject */}
-      <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{row.subject}</span>
+      {/* subject — compact mode hides it except on HEAD; the span stays in
+       * layout (flex-1) so toggling never reflows the row, hover reveals */}
+      <span
+        className={`min-w-0 flex-1 truncate text-sm text-zinc-200${
+          subjectCompact && !isHead ? ' opacity-0 transition-opacity duration-100 group-hover:opacity-100' : ''
+        }`}
+      >
+        {row.subject}
+      </span>
 
       {/* meta */}
       <span className="ml-3 shrink-0 text-xs text-zinc-500">{row.author}</span>

@@ -4,12 +4,14 @@ import type { CommitRow } from './types'
  * Lane assignment over the display-ordered rows.
  *
  * With branch tips (the app always passes them), lanes follow BRANCHES —
- * gitgraph/GitButler style:
- * - the checked-out branch owns the trunk (lane 0, leftmost); its first-parent
- *   chain runs straight down;
- * - every other branch's chain gets its own column to the right (ordered by
- *   how new its tip is), so commits branch off with a curve instead of
- *   continuing the trunk line — the HEAD commit is the top of its column;
+ * gitgraph/GitButler style, laid out as a TREE around the working branch:
+ * - the checked-out branch owns the trunk; its first-parent chain runs
+ *   straight down the MIDDLE of the lane band;
+ * - every other branch's chain gets its own column, alternating sides around
+ *   the trunk (newest tip → trunk+1, next → trunk−1, …) so branches fan out
+ *   left AND right instead of stacking to the right — with the band centered
+ *   by the view (GraphView's originX), the HEAD branch sits where the eye
+ *   rests, not glued to the left edge;
  * - tags never affect lanes; commits unreachable from any branch tip (merged
  *   and deleted branches) form their own chains as fallback.
  *
@@ -21,7 +23,7 @@ import type { CommitRow } from './types'
  * Pure + deterministic so it can be unit-tested and memoized.
  */
 export interface LaneLayout {
-  /** sha → lane index (0 = leftmost) */
+  /** sha → lane slot (0 = leftmost); the trunk holds the middle slot */
   lanes: Map<string, number>
   laneCount: number
 }
@@ -146,7 +148,7 @@ function assignLanesChains(
     chains.push({ rows: walk(trunkTip.sha), trunk: true })
   }
 
-  // side branches: newest tip first → leftmost column, like the fan in the UI
+  // side branches: newest tip first → closest column to the trunk
   const sideTips = tips
     .filter((t) => rowBySha.has(t.sha) && !claimed.has(t.sha))
     .sort((a, b) => (idxBySha.get(a.sha) ?? 0) - (idxBySha.get(b.sha) ?? 0))
@@ -170,16 +172,31 @@ function assignLanesChains(
     }
   }
 
-  // lane 0 = trunk; every side branch chain gets its own column, ordered by
-  // tip recency (newest tip = leftmost branch column), like the fan in the UI
-  let laneCount = 1
-  for (const chain of chains) {
-    const lane = chain.trunk ? 0 : laneCount
-    for (const r of chain.rows) lanes.set(r.sha, lane)
-    if (!chain.trunk) laneCount++
+  // tree layout: trunk = offset 0; side chains ALTERNATE sides around it
+  // (1st → +1, 2nd → −1, 3rd → +2, 4th → −2, …, newest tips closest), then
+  // the signed offsets normalize to plain 0..laneCount−1 slots with the trunk
+  // in the middle — consumers never see a negative lane. Appending older
+  // pages only ever adds chains at the fan's outer edge, so existing columns
+  // keep their slots (the whole band shifts at most one lane right).
+  let sideIndex = 0
+  const offsets = chains.map((chain) => {
+    if (chain.trunk) return 0
+    sideIndex++
+    return sideIndex % 2 === 1 ? (sideIndex + 1) / 2 : -sideIndex / 2
+  })
+  let min = 0
+  let max = 0
+  for (const o of offsets) {
+    if (o < min) min = o
+    if (o > max) max = o
   }
+  const left = -min
+  chains.forEach((chain, i) => {
+    const lane = offsets[i] + left
+    for (const r of chain.rows) lanes.set(r.sha, lane)
+  })
 
-  return { lanes, laneCount }
+  return { lanes, laneCount: Math.max(1, max + left + 1) }
 }
 
 /**

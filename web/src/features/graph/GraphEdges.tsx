@@ -16,9 +16,22 @@ const STROKE_W = 2.5
 /**
  * SVG edge layer culled to the visible window. Edges are bezier curves from a
  * commit to each of its parents; unloaded (dangling) parents get a downward
- * stub so the graph visibly continues beyond the loaded window.
+ * stub so the graph visibly continues beyond the loaded window. `originX`
+ * shifts the whole layer right when the lane band is centered (tree layout).
  */
-function GraphEdgesInner({ start, end, offset = 0, dim = false }: { start: number; end: number; offset?: number; dim?: boolean }) {
+function GraphEdgesInner({
+  start,
+  end,
+  offset = 0,
+  dim = false,
+  originX = 0,
+}: {
+  start: number
+  end: number
+  offset?: number
+  dim?: boolean
+  originX?: number
+}) {
   const edges = useGraphStore((s) => s.edges)
   const laneCount = useGraphStore((s) => s.laneLayout.laneCount)
 
@@ -57,8 +70,8 @@ function GraphEdgesInner({ start, end, offset = 0, dim = false }: { start: numbe
   if (!paths || paths.out.length === 0) {
     return (
       <svg
-        className="pointer-events-none absolute left-0"
-        style={{ top: start * ROW_H + offset, opacity: dim ? 0.25 : 1, transition: 'opacity 150ms' }}
+        className="pointer-events-none absolute"
+        style={{ top: start * ROW_H + offset, left: originX, opacity: dim ? 0.25 : 1, transition: 'left 150ms, opacity 150ms' }}
         width={120}
         height={(end - start) * ROW_H}
       >
@@ -67,12 +80,12 @@ function GraphEdgesInner({ start, end, offset = 0, dim = false }: { start: numbe
     )
   }
 
-  const width = Math.max(120, laneX(laneCount) + 20)
+  const width = Math.max(120, laneX(laneCount) + 20 + originX)
 
   return (
     <svg
-      className="pointer-events-none absolute left-0"
-      style={{ top: start * ROW_H + offset, width, height: (end - start) * ROW_H, opacity: dim ? 0.25 : 1, transition: 'opacity 150ms' }}
+      className="pointer-events-none absolute"
+      style={{ top: start * ROW_H + offset, left: originX, width, height: (end - start) * ROW_H, opacity: dim ? 0.25 : 1, transition: 'left 150ms, opacity 150ms' }}
       data-testid="graph-edges"
     >
       {paths.out.map((d, i) => (

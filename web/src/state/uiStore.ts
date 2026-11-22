@@ -64,6 +64,14 @@ interface UiState {
   stashOpen: boolean
   toggleStash(): void
 
+  /** Graph view: hide every row's commit subject except HEAD's (hover peeks) */
+  subjectCompact: boolean
+  setSubjectCompact(v: boolean): void
+
+  /** Graph view: hide branches with no remote twin and no upstream — their chips and unique commits leave the graph */
+  hideNonTracking: boolean
+  setHideNonTracking(v: boolean): void
+
   /**
    * One-shot commit-box prefill (amend-style) — set by squash merge with the
    * messages gathered from the squashed commits; the staging panel consumes
@@ -171,6 +179,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   stashOpen: true,
   toggleStash: () => set((s) => ({ stashOpen: !s.stashOpen })),
 
+  subjectCompact: localStorage.getItem('sirgit.subjectCompact') === '1',
+  setSubjectCompact: (v) => {
+    localStorage.setItem('sirgit.subjectCompact', v ? '1' : '0')
+    set({ subjectCompact: v })
+  },
+
+  hideNonTracking: localStorage.getItem('sirgit.hideNonTracking') === '1',
+  setHideNonTracking: (v) => {
+    localStorage.setItem('sirgit.hideNonTracking', v ? '1' : '0')
+    set({ hideNonTracking: v })
+  },
+
   commitPrefill: null,
   setCommitPrefill: (v) => set({ commitPrefill: v }),
 
@@ -216,7 +236,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   detailsSha: null,
   setDetailsSha: (sha) => set({ detailsSha: sha }),
 
-  // 234px minimum: below this the Fetch/Pull row in the panel header wraps/overlaps
+  // 234px minimum: keeps the panel's branch/tag rows and header controls
+  // (filter toggle + collapse) from crowding
   refsPanelWidth: Math.max(234, loadNum('sirgit.refsPanelWidth', 256)),
   refsPanelCollapsed: localStorage.getItem('sirgit.refsPanelCollapsed') === '1',
   commitDetailWidth: loadNum('sirgit.commitDetailWidth', 440),

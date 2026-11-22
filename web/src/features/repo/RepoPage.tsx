@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, GitBranch, RefreshCw, CloudDownload, Download, Loader2 } from 'lucide-react'
+import { ArrowLeft, GitBranch, RefreshCw, CloudDownload, Download, Loader2, Eye, EyeOff } from 'lucide-react'
 import { api, pollOp } from '../../lib/client'
 import { useRefs, useStatus, useConfig } from '../../api/hooks'
 import { useRepoEvents } from '../../lib/ws'
@@ -26,6 +26,8 @@ export default function RepoPage() {
   const qc = useQueryClient()
   const { data: config } = useConfig()
   const netBusy = useUiStore((s) => s.netBusy)
+  const subjectCompact = useUiStore((s) => s.subjectCompact)
+  const setSubjectCompact = useUiStore((s) => s.setSubjectCompact)
   const busyLabel = useUiStore((s) => (s.busyCount > 0 ? s.busyLabel : null))
   const ghostPreview = useUiStore((s) => s.ghostPreview)
   const selectedSha = useUiStore((s) => s.selectedSha)
@@ -87,20 +89,49 @@ export default function RepoPage() {
     }
   })
 
-  // branch tips drive lane assignment (checked-out branch owns the trunk)
+  // branch tips drive lane assignment (checked-out branch owns the trunk).
+  // With the non-tracking filter on, hidden branches drop out of the tips and
+  // extraRoots pins remote/tag history — only commits unique to a hidden
+  // branch leave the graph (graphStore prunes by reachability).
+  const hideNonTracking = useUiStore((s) => s.hideNonTracking)
   useEffect(() => {
     if (!refs) return
+    const visibleBranches = hideNonTracking
+      ? (refs.branches ?? []).filter(
+          (b) =>
+            b.name === refs.head?.branch ||
+            b.upstream != null ||
+            (refs.remoteBranches ?? []).some((r) => r.name.endsWith(`/${b.name}`)),
+        )
+      : (refs.branches ?? [])
+    const extraRoots = hideNonTracking
+      ? [...(refs.remoteBranches ?? []).map((r) => r.sha), ...(refs.tags ?? []).map((t) => t.sha)]
+      : null
     useGraphStore.getState().setGraphRefs(
-      (refs.branches ?? []).map((b) => ({ sha: b.sha, current: b.name === refs.head?.branch })),
+      visibleBranches.map((b) => ({ sha: b.sha, current: b.name === refs.head?.branch })),
       refs.head?.sha ?? null,
+      extraRoots,
     )
-  }, [refs])
+  }, [refs, hideNonTracking])
+
+  /** branches the non-tracking filter hides (graph chips + tips; the sidebar list keeps them) */
+  const hiddenBranches = useMemo(() => {
+    const set = new Set<string>()
+    if (!hideNonTracking || !refs) return set
+    for (const b of refs.branches ?? []) {
+      if (b.name === refs.head?.branch || b.upstream != null) continue
+      if ((refs.remoteBranches ?? []).some((r) => r.name.endsWith(`/${b.name}`))) continue
+      set.add(b.name)
+    }
+    return set
+  }, [refs, hideNonTracking])
 
   // ref chips by sha for the graph
   const refBySha = useMemo(() => {
     const m = new Map<string, import('../../lib/types').RefInfo[]>()
     const push = (list: import('../../lib/types').RefInfo[] | undefined) => {
       for (const r of list ?? []) {
+        if (r.type === 'branch' && hiddenBranches.has(r.name)) continue
         const arr = m.get(r.sha) ?? []
         arr.push(r)
         m.set(r.sha, arr)
@@ -110,7 +141,7 @@ export default function RepoPage() {
     push(refs?.remoteBranches)
     push(refs?.tags)
     return m
-  }, [refs])
+  }, [refs, hiddenBranches])
 
   // Header fetch/pull operate on the checked-out branch — push lives on the
   // branch/tag action bar (select a ref chip to push it). Pull is disabled
@@ -590,6 +621,16 @@ export default function RepoPage() {
               void applyDelta()
             }}
           />
+          <HeaderButton
+            icon={subjectCompact ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            title={
+              subjectCompact
+                ? 'Show commit titles'
+                : 'Hide commit titles except HEAD — hover a row to peek at it'
+            }
+            onClick={() => setSubjectCompact(!subjectCompact)}
+            testid="toggle-subjects"
+          />
         </div>
       </header>
 
@@ -651,7 +692,8 @@ function HeaderButton({
   testid,
 }: {
   icon: ReactNode
-  label: string
+  /** omitted → icon-only button (view toggles) */
+  label?: string
   onClick: () => void
   busy?: boolean
   disabled?: boolean

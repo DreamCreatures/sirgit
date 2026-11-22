@@ -106,12 +106,13 @@ describe('assignLanes with branch tips', () => {
       { sha: 'd3', current: false },
     ]
     const { lanes, laneCount } = assignLanes(ordered, tips, 'h')
-    // trunk stays at lane 0 — HEAD is the top of its column
-    expect(lanes.get('h')).toBe(0)
-    expect(lanes.get('p')).toBe(0)
-    // each branch curves right, ordered by tip recency
-    expect(lanes.get('d1')).toBe(1)
-    expect(lanes.get('d2')).toBe(2)
+    // trunk holds the MIDDLE slot of the tree layout — HEAD is its column top
+    expect(lanes.get('h')).toBe(1)
+    expect(lanes.get('p')).toBe(1)
+    // branches alternate sides, newest tip closest to the trunk:
+    // d1 → trunk+1 (right), d2 → trunk−1 (left), d3 → trunk+2
+    expect(lanes.get('d1')).toBe(2)
+    expect(lanes.get('d2')).toBe(0)
     expect(lanes.get('d3')).toBe(3)
     expect(laneCount).toBe(4)
   })
