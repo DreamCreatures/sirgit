@@ -24,23 +24,26 @@ function GraphEdgesInner({
   end,
   offset = 0,
   gapAfter = -1,
+  gapSize = 0,
   dim = false,
   originX = 0,
 }: {
   start: number
   end: number
   offset?: number
-  /** selection gap: rows at i ≥ gapAfter render one ROW_H lower (-1 = none) */
+  /** selection gap: the selected row sits gapSize lower, rows below it 2×gapSize (-1 = none) */
   gapAfter?: number
+  gapSize?: number
   dim?: boolean
   originX?: number
 }) {
   const edges = useGraphStore((s) => s.edges)
   const laneCount = useGraphStore((s) => s.laneLayout.laneCount)
-  // layer placement under the gap: uniformly shifted when the gap is above
-  // the window, one row taller when the gap falls inside it
-  const shift = gapAfter >= 0 && gapAfter <= start ? ROW_H : 0
-  const extra = gapAfter > start && gapAfter <= end ? ROW_H : 0
+  // layer placement under the gaps: uniformly shifted when the gaps are above
+  // the window, taller when a gap falls inside it
+  const gOf = (i: number) => (gapAfter < 0 || gapSize <= 0 || i < gapAfter ? 0 : i === gapAfter ? gapSize : 2 * gapSize)
+  const shift = gOf(start)
+  const extra = gOf(end) - gOf(start)
 
   const paths = useMemo(() => {
     if (end <= start) return null
@@ -53,14 +56,14 @@ function GraphEdgesInner({
       if (max < start - 1 || min > end) continue
 
       const x1 = laneX(e.fromLane)
-      const y1 = e.fromIdx * ROW_H + ROW_H / 2 - start * ROW_H + (gapAfter >= 0 && e.fromIdx >= gapAfter ? ROW_H : 0)
+      const y1 = e.fromIdx * ROW_H + ROW_H / 2 - start * ROW_H + (gOf(e.fromIdx) - shift)
       if (e.dangling) {
         out.push(`M ${x1} ${y1} L ${x1} ${y1 + ROW_H / 2}`)
         colors.push(laneColor(e.fromLane))
         continue
       }
       const x2 = laneX(e.toLane)
-      const y2 = e.toIdx * ROW_H + ROW_H / 2 - start * ROW_H + (gapAfter >= 0 && e.toIdx >= gapAfter ? ROW_H : 0)
+      const y2 = e.toIdx * ROW_H + ROW_H / 2 - start * ROW_H + (gOf(e.toIdx) - shift)
       if (x1 === x2) {
         out.push(`M ${x1} ${y1} L ${x1} ${y2}`)
       } else {
@@ -72,7 +75,7 @@ function GraphEdgesInner({
       colors.push(laneColor(e.fromLane))
     }
     return { out, colors }
-  }, [edges, start, end, gapAfter])
+  }, [edges, start, end, gapAfter, gapSize])
 
   if (!paths || paths.out.length === 0) {
     return (

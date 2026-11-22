@@ -129,22 +129,28 @@ export default function GraphView({
   const ghostLane = ghostIdx >= 0 ? (laneLayout.lanes.get(ghostSha!) ?? -1) : -1
   const showGhost = ghostIdx >= 0 && ghostLane >= 0
   const ghostOffset = totalRows > 0 ? ROW_H : 0
-  // --- selection gap: while a row's action popup is up, that row pushes
-  // itself and everything below one ROW_H down — the bar floats in the
-  // opened gap instead of over the row ABOVE, which is exactly the
-  // move/drag target the selection exists to act on ("distance between
-  // sibling nodes increases 100%", per the user). All index→y math goes
-  // through rowTop so rows, edges, ghost, tether and previews agree. ---
+  // --- selection gap: while a row's action popup is up, that row gains
+  // breathing room on BOTH sides — 75% of a row height above and below
+  // ("distance between sibling nodes +75%", per the user) — and the bar
+  // floats in the opened space above instead of over the row ABOVE, which
+  // is exactly the move/drag target the selection exists to act on. All
+  // index→y math goes through rowTop so rows, edges, ghost, tether and
+  // previews agree. ---
+  const SEL_GAP = Math.round(ROW_H * 0.75)
   const popupActive =
     !!renderActions && selectedSha != null && detailsSha !== selectedSha && ordered.some((r) => r.sha === selectedSha)
   const selGapIdx = popupActive ? ordered.findIndex((r) => r.sha === selectedSha) : -1
-  const rowTop = (i: number) => i * ROW_H + ghostOffset + (selGapIdx >= 0 && i >= selGapIdx ? ROW_H : 0)
+  // the selected row itself drops one gap; everything strictly below drops
+  // two (the gap above it + the gap below it)
+  const selShift = (i: number) =>
+    selGapIdx < 0 || i < selGapIdx ? 0 : i === selGapIdx ? SEL_GAP : 2 * SEL_GAP
+  const rowTop = (i: number) => i * ROW_H + ghostOffset + selShift(i)
   const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H : rowTop(ghostIdx - 1)
-  const contentH = totalRows * ROW_H + ghostOffset + (selGapIdx >= 0 ? ROW_H : 0)
+  const contentH = totalRows * ROW_H + ghostOffset + (selGapIdx >= 0 ? 2 * SEL_GAP : 0)
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
-  // +1 window row at the bottom when the gap shifts rows down out of the
-  // uniform-height assumption
-  const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN + (selGapIdx >= 0 ? 1 : 0))
+  // extra window rows at the bottom when the gaps shift rows down out of
+  // the uniform-height assumption
+  const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN + (selGapIdx >= 0 ? 2 : 0))
 
   // tree layout centers the TRUNK itself (the checked-out branch's column),
   // not the whole lane band: merge-heavy repos accumulate hundreds of
@@ -290,7 +296,7 @@ export default function GraphView({
             </svg>
           </div>
         )}
-        <GraphEdges start={start} end={end} offset={ghostOffset} gapAfter={selGapIdx} dim={spotlight} originX={originX} />
+        <GraphEdges start={start} end={end} offset={ghostOffset} gapAfter={selGapIdx} gapSize={selGapIdx >= 0 ? SEL_GAP : 0} dim={spotlight} originX={originX} />
         {visibleRows.map((row, i) => {
           const idx = start + i
           const rowLane = laneLayout.lanes.get(row.sha) ?? 0
@@ -299,7 +305,7 @@ export default function GraphView({
               key={row.sha}
               row={row}
               index={idx}
-              topOffset={ghostOffset + (selGapIdx >= 0 && idx >= selGapIdx ? ROW_H : 0)}
+              topOffset={ghostOffset + selShift(idx)}
               lane={rowLane}
               originX={originX}
               tagSide={
@@ -399,7 +405,7 @@ export default function GraphView({
             selectedRef={selectedRef}
             index={ordered.findIndex((r) => r.sha === selectedSha)}
             topOffset={ghostOffset}
-            gapAbove={selGapIdx >= 0 ? ROW_H : 0}
+            gapAbove={selGapIdx >= 0 ? SEL_GAP : 0}
             laneCount={laneLayout.laneCount}
             originX={originX}
             scrollRef={scrollRef}
