@@ -70,12 +70,13 @@ interface UiState {
 
   /**
    * Left-panel branch-list filter. Graph map is NEVER filtered — only this
-   * panel shrinks. local = only the local Branches section shows (remote
-   * branches, tags and remotes are hidden); recent = the last 10 branches
-   * CHECKED OUT (HEAD reflog, still existing; current branch always listed).
+   * panel shrinks. track = local branches with an upstream or a remote twin;
+   * untrack = the complement (created locally, never pushed) — the pair
+   * drives branch cleanup; recent = the last 10 branches CHECKED OUT (HEAD
+   * reflog, still existing; current branch always listed).
    */
-  branchFilter: 'all' | 'local' | 'recent'
-  setBranchFilter(v: 'all' | 'local' | 'recent'): void
+  branchFilter: 'all' | 'track' | 'untrack' | 'recent'
+  setBranchFilter(v: 'all' | 'track' | 'untrack' | 'recent'): void
 
   /**
    * One-shot commit-box prefill (amend-style) — set by squash merge with the
@@ -247,11 +248,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ subjectCompact: v })
   },
 
-  branchFilter: ((): 'all' | 'local' | 'recent' => {
+  branchFilter: ((): 'all' | 'track' | 'untrack' | 'recent' => {
     const v = localStorage.getItem('sirgit.branchFilter')
-    if (v === 'recent') return v
-    // 'tracking' is the legacy value from before Track was replaced by Local
-    return v === 'local' || v === 'tracking' ? 'local' : 'all'
+    if (v === 'track' || v === 'untrack' || v === 'recent') return v
+    // 'tracking' is the pre-rename spelling of track; 'local' was the
+    // short-lived middle slot before it became Track/Untrack → back to All
+    if (v === 'tracking') return 'track'
+    return 'all'
   })(),
   setBranchFilter: (v) => {
     localStorage.setItem('sirgit.branchFilter', v)

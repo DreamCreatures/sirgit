@@ -129,12 +129,15 @@ export default function RefsPanel({ path }: { path: string }) {
       return a.name.localeCompare(b.name)
     })
 
-  // sidebar-only branch filter. 'local' keeps every local branch (it hides
-  // the sections below instead); 'recent' = the branches the user CHECKED
-  // OUT most recently (HEAD reflog, still existing, capped 10) — where you
-  // switched to, not which branch got new commits. The checked-out branch
-  // is always listed and pinned on top.
+  // sidebar-only branch filter — a cleanup tool: track = local branches with
+  // an upstream or a <remote>/<name> twin (delete once their remote merged);
+  // untrack = created locally, never pushed (review and prune). recent = the
+  // branches CHECKED OUT most recently (HEAD reflog, still existing, capped
+  // 10) — where you switched to, not which branch got new commits. The
+  // checked-out branch is always listed and pinned on top.
   const RECENT_MAX = 10
+  const isTracked = (b: (typeof branches)[number]) =>
+    b.upstream != null || remoteBranches.some((r) => r.name.endsWith(`/${b.name}`))
   const visibleBranches =
     branchFilter === 'recent'
       ? (() => {
@@ -145,7 +148,14 @@ export default function RefsPanel({ path }: { path: string }) {
             .sort((a, b) => (recentIdx.get(a.name) ?? -1) - (recentIdx.get(b.name) ?? -1))
           return kept.slice(0, RECENT_MAX)
         })()
-      : pinAndSort(branches, (b) => b.name === head?.branch)
+      : pinAndSort(
+          branches.filter((b) => {
+            if (branchFilter === 'all') return true
+            if (b.name === head?.branch) return true
+            return branchFilter === 'track' ? isTracked(b) : !isTracked(b)
+          }),
+          (b) => b.name === head?.branch,
+        )
   const sortedRemoteBranches = pinAndSort(
     remoteBranches,
     (r) => !!head?.branch && r.name.endsWith(`/${head.branch}`),
@@ -170,8 +180,9 @@ export default function RefsPanel({ path }: { path: string }) {
         <div className="flex overflow-hidden rounded-md border border-zinc-700/80" data-testid="branch-filter">
           {(
             [
-              ['all', 'All', 'All branches'],
-              ['local', 'Local', 'Only local branches — remote branches, tags and remotes are hidden'],
+              ['all', 'All', 'All local branches'],
+              ['track', 'Track', 'Local branches with an upstream or a remote twin (<remote>/<branch>)'],
+              ['untrack', 'Untrack', 'Local branches with no upstream and no remote twin — created locally, never pushed'],
               ['recent', 'Recent', 'The last 10 branches you checked out (still existing)'],
             ] as const
           ).map(([value, label, title]) => (
@@ -255,9 +266,6 @@ export default function RefsPanel({ path }: { path: string }) {
         )}
       </Section>
 
-      {/* Local = only the local branches above — everything remote/tag hides */}
-      {branchFilter !== 'local' && (
-        <>
       <Section title={`Remote branches (${remoteBranches.length})`}>
         {sortedRemoteBranches.map((b) => {
           const remote = b.name.split('/')[0]
@@ -350,8 +358,6 @@ export default function RefsPanel({ path }: { path: string }) {
         ))}
         {remotes.length === 0 && <p className="px-2 py-1 text-xs text-zinc-600">no remotes</p>}
       </Section>
-        </>
-      )}
 
       </div>
 
