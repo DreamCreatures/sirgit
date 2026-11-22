@@ -236,6 +236,7 @@ export default function RepoPage() {
       .rebaseStart(path, ontoSha)
       .then(() => {
         toast({ kind: 'success', title: `Rebased ${currentBranch} onto ${ontoSha.slice(0, 7)}` })
+        useUiStore.getState().select(null)
         refreshAll()
       })
       .catch((e: unknown) => {
@@ -280,6 +281,7 @@ export default function RepoPage() {
         .branchMove(path, branch, targetSha)
         .then(() => {
           toast({ kind: 'success', title: `Moved ${branch} to ${targetSha.slice(0, 7)}` })
+          useUiStore.getState().select(null)
           refreshAll()
         })
         .catch((e: unknown) => {
@@ -327,6 +329,7 @@ export default function RepoPage() {
           .tagMove(path, tag, targetSha)
           .then(() => {
             toast({ kind: 'success', title: `Moved ${tag} to ${targetSha.slice(0, 7)}` })
+            useUiStore.getState().select(null)
             refreshAll()
           })
           .catch((e: unknown) => {
@@ -369,6 +372,7 @@ export default function RepoPage() {
     void api
       .branchMerge(path, from, into, squash)
       .then((res) => {
+        useUiStore.getState().select(null)
         if (squash && res?.title) {
           // changes staged + messages gathered server-side: prefill amend-style
           useUiStore.getState().setCommitPrefill({ title: res.title, body: res.body ?? '' })
@@ -433,6 +437,7 @@ export default function RepoPage() {
       const { opId } = await fn()
       await pollOp(opId)
       toast({ kind: 'success', title: done })
+      useUiStore.getState().select(null)
       void qc.invalidateQueries({ queryKey: ['refs', path] })
       void qc.invalidateQueries({ queryKey: ['status', path] })
       void qc.invalidateQueries({ queryKey: ['stash', path] })

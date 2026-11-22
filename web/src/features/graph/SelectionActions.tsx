@@ -47,11 +47,16 @@ export function SelectionActions({
   const [pushing, setPushing] = useState(false)
 
   // every helper marks the global busy guard: while any repo-altering op
-  // runs, the BusyOverlay blocks other actions app-wide
+  // runs, the BusyOverlay blocks other actions app-wide. Success closes the
+  // action bar (user rule: unfocus right after the action lands — a bar
+  // anchored to a moved/deleted/renamed ref is stale by definition).
   const run = (fn: () => Promise<unknown>) => {
     useUiStore.getState().beginOp('Working')
     fn()
-      .then(() => onRefresh())
+      .then(() => {
+        useUiStore.getState().select(null)
+        onRefresh()
+      })
       .catch((e: unknown) => {
         const { title, detail } = friendlyError(e)
         toast({ kind: 'error', title, detail })
@@ -65,7 +70,10 @@ export function SelectionActions({
   const runWithConflicts = (fn: () => Promise<unknown>, done: string, gerund: string): Promise<unknown> => {
     useUiStore.getState().beginOp(gerund)
     return fn()
-      .then(() => toast({ kind: 'success', title: done }))
+      .then(() => {
+        useUiStore.getState().select(null)
+        toast({ kind: 'success', title: done })
+      })
       .catch((e: unknown) => {
         const { title, detail } = friendlyError(e)
         if (/conflict/i.test(`${title} ${detail ?? ''}`)) {
@@ -86,7 +94,10 @@ export function SelectionActions({
   const runInDialog = (fn: () => Promise<unknown>): Promise<unknown> => {
     useUiStore.getState().beginOp('Working')
     return fn()
-      .then(() => onRefresh())
+      .then(() => {
+        useUiStore.getState().select(null)
+        onRefresh()
+      })
       .finally(() => useUiStore.getState().endOp())
   }
 
@@ -103,7 +114,10 @@ export function SelectionActions({
     const pollOpAfter = (started: Promise<{ opId: string }>) =>
       started
         .then(({ opId }) => pollOp(opId))
-        .then(() => toast({ kind: 'success', title: 'Push complete' }))
+        .then(() => {
+          useUiStore.getState().select(null)
+          toast({ kind: 'success', title: 'Push complete' })
+        })
         .catch((e: unknown) => {
           if (e instanceof GitRequestError && e.code === 'non-fast-forward' && !refspec.includes('refs/tags/')) {
             useUiStore.getState().setDialog({

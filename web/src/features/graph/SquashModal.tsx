@@ -78,6 +78,8 @@ export default function SquashModal({
         } else {
           toast({ kind: 'success', title: `Squashed ${selectedCount} commits into one on ${modal.branch}` })
         }
+        // the gesture is complete — drop the armed selection and its bar
+        useUiStore.getState().select(null)
         onDone()
       })
       .catch((e: unknown) => {
