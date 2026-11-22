@@ -144,10 +144,15 @@ export default function GraphView({
   const headIdx = headSha ? ordered.findIndex((r) => r.sha === headSha) : -1
   const headLane = headIdx >= 0 && headSha ? (laneLayout.lanes.get(headSha) ?? -1) : -1
   const trunkLane = headIdx >= 0 && headLane >= 0 ? headLane : undefined
+  // left mode: the trunk hugs the panel edge, but its TAG chips hug the
+  // trunk node's LEFT — without an inset a chip like ori/v0.1.6 starts at
+  // negative x and clips ("...6"). 64px of padding buys ~100px of tag room;
+  // tree mode centers the trunk, so its corridors already have space.
+  const LEFT_TAG_PAD = 64
   const originX =
     laneMode === 'tree' && trunkLane != null
       ? Math.max(0, Math.floor(viewportW / 2) - laneX(trunkLane))
-      : 0
+      : LEFT_TAG_PAD
   const showTether = headIdx >= 0 && headLane >= 0 && !ghostSha
   const headCenterY = headIdx * ROW_H + ghostOffset + ROW_H / 2
   const tetherCx = originX + laneX(headLane)
