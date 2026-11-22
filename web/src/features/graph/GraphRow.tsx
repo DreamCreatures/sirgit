@@ -89,7 +89,8 @@ const NODE_PAD = 8
  * branch/remote chip ARMS it, but the target buttons stay hidden: hovering
  * a row's commit node reveals just that row's actions ([rebase][squash]
  * while the current branch is armed, [move to] always, [merge][squash
- * merge] on the receiving branch's row); leaving the row hides them again.
+ * merge] on the receiving branch's row) and the row's own branch chips
+ * step aside while the buttons show; leaving the row restores both.
  * Local branch chips can still be dragged onto a row to move the branch.
  */
 function GraphRowInner({
@@ -220,6 +221,12 @@ function GraphRowInner({
   // the user actually hovers a node
   const hasRowActions =
     showRebase || (showSquash && squashValid) || showMove || (!!mergeIntoBranch && !mergeNoop)
+  // while this row's hover-revealed actions are showing, its branch chips
+  // step aside (display:none) so the buttons hug the node without the chip
+  // crowd — the chips return when the row is left ("hide branches on node
+  // target"). The armed row never qualifies (it offers no actions), so the
+  // selected chip — the action popup's anchor — is never hidden.
+  const actionsRevealed = actionsVisible && !!armed && hasRowActions
 
   const onDragOver = (e: DragEvent) => {
     if ((!onMoveBranch && !onMoveTag) || !e.dataTransfer.types.includes(DRAG_TYPE)) return
@@ -374,7 +381,7 @@ function GraphRowInner({
        * remotes] — tags sit on the node's other side now. Remote names
        * abbreviate to 3 letters in LABELS ONLY (origin/main → ori/main) —
        * selection, drags and git refspecs all keep the full name via refName. */}
-      <div className="flex shrink-0 items-center gap-1" data-testid="row-chips">
+      <div className={`flex shrink-0 items-center gap-1${actionsRevealed ? ' hidden' : ''}`} data-testid="row-chips">
         {shownBranches.map((rf) =>
           rf.type === 'branch' ? (
             <Chip
@@ -444,7 +451,7 @@ function GraphRowInner({
        * (any local) branch down to it; [move to] points any armed ref here;
        * [merge]/[squash merge] fold the armed branch into this row's branch.
        * Hover previews draw on the graph via [data-action-preview]. */}
-      {actionsVisible && armed && hasRowActions && (
+      {actionsRevealed && armed && (
         <div className="flex shrink-0 items-center gap-1.5" data-testid="row-actions">
           {showRebase && (
             <button
