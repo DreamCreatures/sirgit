@@ -109,6 +109,13 @@ export interface QuickStatus {
   subRepos?: string[]
 }
 
+/** One pickable child directory (home-page path autocomplete). */
+export interface DirEntry {
+  name: string
+  /** the directory is a git worktree */
+  git: boolean
+}
+
 export interface OpState {
   op: string
   path: string

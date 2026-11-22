@@ -151,6 +151,7 @@ interface UiState {
   recentRepos: string[]
   addRecentRepo(path: string): void
   removeRecentRepo(path: string): void
+  clearRecentRepos(): void
 }
 
 let toastId = 0
@@ -274,5 +275,9 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next = get().recentRepos.filter((r) => r !== path)
     localStorage.setItem(RECENTS_KEY, JSON.stringify(next))
     set({ recentRepos: next })
+  },
+  clearRecentRepos() {
+    localStorage.setItem(RECENTS_KEY, '[]')
+    set({ recentRepos: [] })
   },
 }))

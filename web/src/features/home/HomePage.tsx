@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router'
-import { FolderGit2, Download, Plus, Trash2, ArrowRight, GitBranch } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Folder, FolderGit2, Download, Plus, Trash2, ArrowRight, GitBranch } from 'lucide-react'
 import { api, pollOp } from '../../lib/client'
+import type { DirEntry } from '../../lib/types'
 import { useUiStore } from '../../state/uiStore'
 import { friendlyError } from '../../lib/gitErrors'
 
@@ -11,11 +13,52 @@ function cleanPath(p: string): string {
 
 export default function HomePage() {
   const navigate = useNavigate()
-  const { recentRepos, addRecentRepo, removeRecentRepo, toast } = useUiStore()
+  const { recentRepos, addRecentRepo, removeRecentRepo, clearRecentRepos, toast } = useUiStore()
   const [pathInput, setPathInput] = useState('')
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneDest, setCloneDest] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+
+  // --- ungit-style sibling autocomplete: as you type a path, list the typed
+  // directory's children so switching to a SIBLING repo is a click away ---
+  const [suggest, setSuggest] = useState<{ dir: string; entries: DirEntry[] } | null>(null)
+  const [highlight, setHighlight] = useState(0)
+  // arrows moved the highlight → Enter/Tab complete the pick; a plain Enter
+  // (nothing touched) still opens the typed path
+  const [touched, setTouched] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const v = pathInput.trim()
+      const slash = v.lastIndexOf('/')
+      if (!v || slash < 0) {
+        setSuggest(null)
+        return
+      }
+      const dir = v.slice(0, slash + 1)
+      const typed = v.slice(slash + 1).toLowerCase()
+      api
+        .fsList(dir)
+        .then((entries) => {
+          setSuggest({ dir, entries: entries.filter((e) => e.name.toLowerCase().startsWith(typed)) })
+          setHighlight(0)
+          setTouched(false)
+        })
+        .catch(() => setSuggest(null))
+    }, 120)
+    return () => clearTimeout(t)
+  }, [pathInput])
+
+  const pickEntry = (e: DirEntry) => {
+    if (!suggest) return
+    // trailing slash invites drilling deeper (the effect lists its children)
+    setPathInput(suggest.dir + e.name + '/')
+    setHighlight(0)
+    setTouched(false)
+    inputRef.current?.focus()
+  }
 
   const openRepo = async (rawPath: string) => {
     const path = cleanPath(rawPath)
@@ -76,6 +119,33 @@ export default function HomePage() {
     }
   }
 
+  const onPathKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (suggest && suggest.entries.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setHighlight((h) => Math.min(h + 1, suggest.entries.length - 1))
+        setTouched(true)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setHighlight((h) => Math.max(h - 1, 0))
+        setTouched(true)
+        return
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && touched) {
+        e.preventDefault()
+        pickEntry(suggest.entries[highlight])
+        return
+      }
+      if (e.key === 'Escape') {
+        setSuggest(null)
+        return
+      }
+    }
+    if (e.key === 'Enter') void openRepo(pathInput)
+  }
+
   const doClone = async () => {
     if (!cloneUrl.trim()) return
     const dest = cleanPath(cloneDest) || cloneUrl.split('/').pop()?.replace(/\.git$/, '') || 'repo'
@@ -107,14 +177,18 @@ export default function HomePage() {
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
         <h2 className="mb-3 text-sm font-medium text-zinc-400">Open a repository</h2>
-        <div className="flex gap-2">
+        <div className="relative flex gap-2">
           <input
+            ref={inputRef}
             className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
             placeholder="/absolute/path/to/repo"
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void openRepo(pathInput)}
+            onKeyDown={onPathKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             autoFocus
+            data-testid="path-input"
           />
           <button
             className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
@@ -123,6 +197,37 @@ export default function HomePage() {
           >
             <ArrowRight className="h-4 w-4" /> Open
           </button>
+          {focused && suggest && suggest.entries.length > 0 && (
+            <ul
+              className="absolute left-0 right-24 top-full z-20 mt-1 max-h-72 overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-2xl"
+              data-testid="path-suggest"
+            >
+              {suggest.entries.slice(0, 50).map((en, i) => (
+                <li key={en.name}>
+                  <button
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-sm ${
+                      i === highlight ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-800/60'
+                    }`}
+                    onMouseDown={(e) => {
+                      // preventDefault keeps the input's focus (no blur race)
+                      e.preventDefault()
+                      pickEntry(en)
+                    }}
+                    onMouseEnter={() => setHighlight(i)}
+                    title={suggest.dir + en.name}
+                  >
+                    {en.git ? (
+                      <FolderGit2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                    ) : (
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                    )}
+                    <span className="truncate">{en.name}</span>
+                    {en.git && <span className="ml-auto shrink-0 text-[10px] text-emerald-500/80">git</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         {busy && busy !== 'clone' && <p className="mt-2 text-xs text-zinc-500">checking {busy}…</p>}
       </section>
@@ -158,27 +263,21 @@ export default function HomePage() {
       </section>
 
       {recentRepos.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-sm font-medium text-zinc-400">Recent repositories</h2>
+        <section data-testid="recent-repos">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-zinc-400">Recent repositories</h2>
+            <button
+              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              onClick={clearRecentRepos}
+              title="Clear the whole recent list"
+              data-testid="clear-recent"
+            >
+              <Trash2 className="h-3 w-3" /> Clear
+            </button>
+          </div>
           <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-xl border border-zinc-800">
             {recentRepos.map((r) => (
-              <li key={r} className="flex items-center gap-3 bg-zinc-900/40 px-4 py-2.5 hover:bg-zinc-900">
-                <FolderGit2 className="h-4 w-4 shrink-0 text-zinc-500" />
-                <button
-                  className="min-w-0 flex-1 truncate text-left font-mono text-sm text-zinc-200 hover:text-emerald-400"
-                  onClick={() => void openRepo(r)}
-                  title={r}
-                >
-                  {r}
-                </button>
-                <button
-                  className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
-                  onClick={() => removeRecentRepo(r)}
-                  title="Remove from list"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </li>
+              <RecentRow key={r} path={r} onOpen={() => void openRepo(r)} onRemove={() => removeRecentRepo(r)} />
             ))}
           </ul>
         </section>
@@ -190,5 +289,40 @@ export default function HomePage() {
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * One recent-repo row. Validates the path server-side (quickstatus) and
+ * renders ONLY real repositories — deleted or de-inited paths silently leave
+ * the list (user rule: "only display valid path"), while their history
+ * entries stay until individually removed or the list is cleared.
+ */
+function RecentRow({ path, onOpen, onRemove }: { path: string; onOpen: () => void; onRemove: () => void }) {
+  const qs = useQuery({
+    queryKey: ['quickstatus', path],
+    queryFn: () => api.quickstatus(path),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  if (!qs.data || (qs.data.type !== 'repo' && qs.data.type !== 'bare')) return null
+  return (
+    <li className="flex items-center gap-3 bg-zinc-900/40 px-4 py-2.5 hover:bg-zinc-900" data-testid="recent-repo">
+      <FolderGit2 className="h-4 w-4 shrink-0 text-zinc-500" />
+      <button
+        className="min-w-0 flex-1 truncate text-left font-mono text-sm text-zinc-200 hover:text-emerald-400"
+        onClick={onOpen}
+        title={path}
+      >
+        {path}
+      </button>
+      <button
+        className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+        onClick={onRemove}
+        title="Remove from list"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </li>
   )
 }

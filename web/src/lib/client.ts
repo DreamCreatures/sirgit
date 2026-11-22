@@ -78,6 +78,9 @@ export const api = {
   quickstatus: (path: string) =>
     request<import('./types').QuickStatus>(`/quickstatus?path=${encodeURIComponent(path)}`),
 
+  fsList: (path: string) =>
+    request<import('./types').DirEntry[]>(`/fs/list?path=${encodeURIComponent(path)}`),
+
   log: (path: string, offset: number, limit: number) =>
     request<import('./types').LogPage>(
       `/log?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}`,

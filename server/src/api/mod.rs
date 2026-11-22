@@ -24,6 +24,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/version", get(version))
         .route("/api/config", get(config::get_config).put(config::put_config))
         .route("/api/quickstatus", get(repo::quickstatus))
+        .route("/api/fs/list", get(repo::fs_list))
         .route("/api/init", post(repo::init))
         .route("/api/createdir", post(repo::createdir))
         .route("/api/clone", post(repo::clone))

@@ -97,3 +97,62 @@ pub async fn op_status(
     let op = op.lock().await.clone();
     Ok(Json(op))
 }
+
+/// One pickable child directory of a path (home-page path autocomplete).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirEntry {
+    pub name: String,
+    /// the directory is a git worktree (has a .git child) — shows the repo badge
+    pub git: bool,
+}
+
+/// `GET /api/fs/list?path=` — child DIRECTORIES of a path (hidden included,
+/// symlinked dirs followed), case-insensitively sorted, capped at 500.
+/// Drives the ungit-style sibling autocomplete on the home page's path input.
+pub async fn fs_list(Query(q): Query<PathQuery>) -> ApiResult<Json<Vec<DirEntry>>> {
+    Ok(Json(list_dirs(&q.path).map_err(ApiError::Io)?))
+}
+
+fn list_dirs(dir: &str) -> std::io::Result<Vec<DirEntry>> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        // metadata (not file_type) follows symlinks — a linked repo is pickable
+        let is_dir = std::fs::metadata(entry.path()).map(|m| m.is_dir()).unwrap_or(false);
+        if !is_dir {
+            continue;
+        }
+        out.push(DirEntry {
+            git: entry.path().join(".git").exists(),
+            name: entry.file_name().to_string_lossy().into_owned(),
+        });
+        if out.len() >= 500 {
+            break;
+        }
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_child_dirs_sorted_with_git_flags() {
+        let dir = std::env::temp_dir().join(format!("sirgit-fslist-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos()));
+        std::fs::create_dir_all(dir.join("Beta")).unwrap();
+        std::fs::create_dir_all(dir.join("alpha")).unwrap();
+        std::fs::create_dir_all(dir.join("alpha/.git")).unwrap();
+        std::fs::create_dir_all(dir.join(".hidden")).unwrap();
+        std::fs::write(dir.join("file.txt"), "x").unwrap();
+        let entries = list_dirs(dir.to_str().unwrap()).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec![".hidden", "alpha", "Beta"], "case-insensitive sort, dirs only");
+        assert!(entries.iter().find(|e| e.name == "alpha").unwrap().git);
+        assert!(!entries.iter().find(|e| e.name == "Beta").unwrap().git);
+        assert!(list_dirs("/no/such/dir").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
