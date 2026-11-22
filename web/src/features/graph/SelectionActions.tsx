@@ -158,16 +158,24 @@ export function SelectionActions({
       {/* plain node: create branch / create tag */}
       {!selBranch && !selTag && !selRemote && (
         <>
-          {rowRefs.some((r) => r.type === 'remote-branch') && (
-            <button
-              className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
-              onClick={() =>
-                onCheckoutRemote(rowRefs.find((r) => r.type === 'remote-branch')!.name)
-              }
-            >
-              <CornerUpLeft className="h-3.5 w-3.5" /> Checkout remote
-            </button>
-          )}
+          {(() => {
+            // "Checkout remote" from a bare node exists for rows whose only
+            // handle is a remote chip (remote-only branch tip). Skip remotes
+            // whose local branch is the one we're ON — HEAD's row always
+            // carries origin/<current>, and checking that out is a no-op
+            const remote = rowRefs.find(
+              (r) => r.type === 'remote-branch' && r.name.slice(r.name.indexOf('/') + 1) !== currentBranch,
+            )
+            if (!remote) return null
+            return (
+              <button
+                className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
+                onClick={() => onCheckoutRemote(remote.name)}
+              >
+                <CornerUpLeft className="h-3.5 w-3.5" /> Checkout remote
+              </button>
+            )
+          })()}
           <button
             className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
             onClick={() => {
