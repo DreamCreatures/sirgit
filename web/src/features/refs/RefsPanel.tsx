@@ -22,6 +22,7 @@ export default function RefsPanel({ path }: { path: string }) {
   const setCollapsed = useUiStore((s2) => s2.setRefsPanelCollapsed)
   const branchFilter = useUiStore((s2) => s2.branchFilter)
   const setBranchFilter = useUiStore((s2) => s2.setBranchFilter)
+  const selectedRef = useUiStore((s2) => s2.selectedRef)
   // tip dates for the "recent" filter — tips of live branches are always in
   // the loaded window; a branch whose tip row isn't loaded is old by
   // definition, so missing reads as not-recent
@@ -110,17 +111,39 @@ export default function RefsPanel({ path }: { path: string }) {
   const remotes = data?.remotes ?? []
   const head = data?.head
 
+  /**
+   * Section ordering (user rule): the SELECTED ref floats to the top, the
+   * rest sort by tip date — latest first (an unloaded tip reads as ancient
+   * and sorts last; date ties fall back to name). Remotes are just names —
+   * no dates, they stay alphabetical.
+   */
+  const pinAndSort = <T extends { name: string; sha: string }>(list: T[], kind: 'branch' | 'remote-branch' | 'tag'): T[] =>
+    [...list].sort((a, b) => {
+      const aSel = selectedRef?.kind === kind && selectedRef.name === a.name ? 1 : 0
+      const bSel = selectedRef?.kind === kind && selectedRef.name === b.name ? 1 : 0
+      if (aSel !== bSel) return bSel - aSel
+      const da = rowsBySha.get(a.sha)?.commitDate ?? 0
+      const db = rowsBySha.get(b.sha)?.commitDate ?? 0
+      if (da !== db) return db - da
+      return a.name.localeCompare(b.name)
+    })
+
   // sidebar-only branch filter; the checked-out branch is always listed
   const RECENT_WINDOW_S = 30 * 24 * 3600
-  const visibleBranches = branches.filter((b) => {
-    if (branchFilter === 'all') return true
-    if (b.name === head?.branch) return true
-    if (branchFilter === 'tracking') {
-      return b.upstream != null || remoteBranches.some((r) => r.name.endsWith(`/${b.name}`))
-    }
-    const tipDate = rowsBySha.get(b.sha)?.commitDate ?? 0
-    return Date.now() / 1000 - tipDate <= RECENT_WINDOW_S
-  })
+  const visibleBranches = pinAndSort(
+    branches.filter((b) => {
+      if (branchFilter === 'all') return true
+      if (b.name === head?.branch) return true
+      if (branchFilter === 'tracking') {
+        return b.upstream != null || remoteBranches.some((r) => r.name.endsWith(`/${b.name}`))
+      }
+      const tipDate = rowsBySha.get(b.sha)?.commitDate ?? 0
+      return Date.now() / 1000 - tipDate <= RECENT_WINDOW_S
+    }),
+    'branch',
+  )
+  const sortedRemoteBranches = pinAndSort(remoteBranches, 'remote-branch')
+  const sortedTags = pinAndSort(tags, 'tag')
   const branchCountLabel =
     visibleBranches.length === branches.length
       ? `${branches.length}`
@@ -226,7 +249,7 @@ export default function RefsPanel({ path }: { path: string }) {
       </Section>
 
       <Section title={`Remote branches (${remoteBranches.length})`}>
-        {remoteBranches.map((b) => {
+        {sortedRemoteBranches.map((b) => {
           const remote = b.name.split('/')[0]
           const localName = b.name.slice(remote.length + 1)
           const hasLocal = branches.some((lb) => lb.name === localName)
@@ -261,7 +284,7 @@ export default function RefsPanel({ path }: { path: string }) {
       </Section>
 
       <Section title={`Tags (${tags.length})`}>
-        {tags.map((t) => (
+        {sortedTags.map((t) => (
           <RefRow
             key={t.name}
             icon={<Tag className="h-3.5 w-3.5" />}
