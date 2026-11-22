@@ -50,7 +50,10 @@ export default function CommitDetail({ path }: { path: string }) {
       <Resizer side="right" currentWidth={width} onResize={setWidth} />
       <header className="flex items-start justify-between gap-2 border-b border-zinc-800 px-4 py-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-zinc-100">{data?.subject ?? '…'}</p>
+          {/* wraps — this drawer is where you READ the commit; a truncated
+           *  one-liner makes long titles (with no body to fall back on)
+           *  unreadable */}
+          <p className="break-words text-sm font-medium leading-snug text-zinc-100">{data?.subject ?? '…'}</p>
           <p className="mt-0.5 text-xs text-zinc-500">
             {data ? (
               <>

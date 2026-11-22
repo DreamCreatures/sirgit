@@ -75,6 +75,10 @@ interface GraphRowProps {
 }
 
 const MAX_CHIPS = 4 // branch chips shown before the +N chip (tags are uncapped — group A)
+/** row subjects cap at the classic 72-col guideline — beyond that one title
+ *  eclipses the refs and reads as noise; hovering the subject shows it all */
+const SUBJECT_CAP = 72
+const clipSubject = (s: string) => (s.length > SUBJECT_CAP ? `${s.slice(0, SUBJECT_CAP - 1).trimEnd()}…` : s)
 const DRAG_TYPE = 'application/x-sirgit-move'
 /** symmetric svg padding around the node circle — keeps the circle centered
  *  exactly on the lane axis so edges run through its center (the HEAD ring
@@ -353,8 +357,9 @@ function GraphRowInner({
                  in layout (flex-1) so the hover peek never reflows the row */}
               <span
                 className={`min-w-0 flex-1 truncate text-sm text-zinc-200${subjectHide}${tagSide === 'left' ? ' text-right' : ''}`}
+                title={row.subject}
               >
-                {row.subject}
+                {clipSubject(row.subject)}
               </span>
               <span className={`shrink-0 text-xs text-zinc-500${metaHide}`}>{row.author}</span>
               <span className={`w-8 shrink-0 text-right text-xs tabular-nums text-zinc-500${metaHide}`}>
@@ -555,7 +560,9 @@ function GraphRowInner({
         <>
           {/* subject — compact mode hides it except HEAD; the span stays in
            * layout (flex-1) so toggling never reflows the row, hover reveals */}
-          <span className={`min-w-0 flex-1 truncate text-sm text-zinc-200${subjectHide}`}>{row.subject}</span>
+          <span className={`min-w-0 flex-1 truncate text-sm text-zinc-200${subjectHide}`} title={row.subject}>
+            {clipSubject(row.subject)}
+          </span>
 
           {/* meta — compact mode fades these too; hover peeks */}
           <span className={`shrink-0 text-xs text-zinc-500${metaHide}`}>{row.author}</span>
