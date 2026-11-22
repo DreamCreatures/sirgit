@@ -74,7 +74,7 @@ interface GraphRowProps {
   onMoveTag?: (tag: string, targetSha: string) => void
 }
 
-const MAX_CHIPS = 4 // [tag][branch][ori/twin][branch] fits before the +N chip
+const MAX_CHIPS = 4 // branch chips shown before the +N chip (tags are uncapped — group A)
 const DRAG_TYPE = 'application/x-sirgit-move'
 /** symmetric svg padding around the node circle — keeps the circle centered
  *  exactly on the lane axis so edges run through its center (the HEAD ring
@@ -142,7 +142,7 @@ function GraphRowInner({
   // left mode mirrors only the tags, branches + message keep the right flow
   // the working branch's tip (HEAD) reads at 50% bigger than branch nodes;
   // plain commits stay smallest
-  const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
+  const r = isHead ? 15 : refs?.some((rf) => rf.type === 'branch') ? 10 : 8
   const chips = refs ?? []
   // Chip order: [tags…][branch, its remote twin, branch, …][orphan remotes].
   // Pushed-tag truth: the server's ls-remote cache (refreshed after every
@@ -166,7 +166,9 @@ function GraphRowInner({
     if (rf.type !== 'branch') continue
     ordered.push(rf)
     paired.add(rf.name)
-    const twin = chips.find((o) => o.type === 'remote-branch' && o.name === `origin/${rf.name}`)
+    // pair any <remote>/<name> twin, not just origin's — repos with other
+    // remotes keep their local + remote chips adjacent too
+    const twin = chips.find((o) => o.type === 'remote-branch' && o.name.endsWith(`/${rf.name}`))
     if (twin) {
       ordered.push(twin)
       paired.add(twin.name)

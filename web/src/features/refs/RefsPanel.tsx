@@ -58,33 +58,29 @@ export default function RefsPanel({ path }: { path: string }) {
     return fn().then(invalidate).finally(() => useUiStore.getState().endOp())
   }
 
+  /** net-op core: busy guard + netBusy around fn + op polling — shared by the
+   *  dialog runner (below) and the sidebar's netMut; callers layer their own
+   *  invalidate/toast/dialog handling on the settled promise */
+  const runNetOp = async (fn: () => Promise<{ opId: string }>, label: string) => {
+    useUiStore.getState().beginOp(label)
+    useUiStore.getState().setNetBusy(label)
+    try {
+      const { opId } = await fn()
+      await pollOp(opId)
+    } finally {
+      useUiStore.getState().setNetBusy(null)
+      useUiStore.getState().endOp()
+    }
+  }
+
   /** network-op runner for dialog onConfirms (remote-branch delete): returns
    * the SETTLED promise so the dialog keeps its spinner until the push lands;
    * failure rejects → AppDialog shows it inline (no duplicate toast) */
-  const netDialogOp = (fn: () => Promise<{ opId: string }>, label: string): Promise<unknown> => {
-    useUiStore.getState().beginOp(label)
-    useUiStore.getState().setNetBusy(label)
-    return fn()
-      .then(({ opId }) => pollOp(opId))
-      .then(invalidate)
-      .finally(() => {
-        useUiStore.getState().setNetBusy(null)
-        useUiStore.getState().endOp()
-      })
-  }
+  const netDialogOp = (fn: () => Promise<{ opId: string }>, label: string): Promise<unknown> =>
+    runNetOp(fn, label).then(invalidate)
 
   const netMut = useMutation({
-    mutationFn: async ({ fn, label }: { fn: () => Promise<{ opId: string }>; label: string }) => {
-      useUiStore.getState().beginOp(label)
-      useUiStore.getState().setNetBusy(label)
-      try {
-        const { opId } = await fn()
-        await pollOp(opId)
-      } finally {
-        useUiStore.getState().setNetBusy(null)
-        useUiStore.getState().endOp()
-      }
-    },
+    mutationFn: ({ fn, label }: { fn: () => Promise<{ opId: string }>; label: string }) => runNetOp(fn, label),
     onSuccess: () => {
       toast({ kind: 'success', title: 'Remote operation completed' })
       invalidate()
