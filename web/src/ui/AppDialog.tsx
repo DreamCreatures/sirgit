@@ -19,7 +19,7 @@ export default function AppDialog() {
   const dialog = useUiStore((s) => s.dialog)
   const setDialog = useUiStore((s) => s.setDialog)
   const [value, setValue] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [pending, setPending] = useState<'confirm' | 'alt' | null>(null)
   const [error, setError] = useState<{ title: string; detail?: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -35,16 +35,16 @@ export default function AppDialog() {
   useEffect(() => {
     if (!dialog) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) setDialog(null)
+      if (e.key === 'Escape' && !pending) setDialog(null)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [dialog, setDialog, submitting])
+  }, [dialog, setDialog, pending])
 
   if (!dialog) return null
 
   const confirm = () => {
-    if (submitting) return
+    if (pending) return
     const close = () => setDialog(null)
     const result =
       dialog.kind === 'prompt'
@@ -58,18 +58,41 @@ export default function AppDialog() {
     }
     // async op: spinner until it settles. Success closes; rejection keeps
     // the dialog open with the error inline — the input stays editable
-    setSubmitting(true)
+    setPending('confirm')
     setError(null)
     void Promise.resolve(result)
       .then(() => {
-        setSubmitting(false)
+        setPending(null)
         close()
       })
       .catch((e: unknown) => {
-        setSubmitting(false)
+        setPending(null)
         setError(friendlyError(e))
         inputRef.current?.focus()
         inputRef.current?.select()
+      })
+  }
+
+  // the optional third choice (confirm-with-alt): same settle semantics as
+  // confirm — its own spinner, errors inline, Esc/backdrop locked while running
+  const alt = () => {
+    if (pending || dialog.kind !== 'confirm' || !dialog.onAlt) return
+    const close = () => setDialog(null)
+    const result = dialog.onAlt()
+    if (result === undefined) {
+      close()
+      return
+    }
+    setPending('alt')
+    setError(null)
+    void Promise.resolve(result)
+      .then(() => {
+        setPending(null)
+        close()
+      })
+      .catch((e: unknown) => {
+        setPending(null)
+        setError(friendlyError(e))
       })
   }
 
@@ -77,7 +100,7 @@ export default function AppDialog() {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !submitting) setDialog(null)
+        if (e.target === e.currentTarget && !pending) setDialog(null)
       }}
       data-testid="app-dialog"
     >
@@ -125,11 +148,22 @@ export default function AppDialog() {
           <button
             className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
             onClick={() => setDialog(null)}
-            disabled={submitting}
+            disabled={!!pending}
             data-testid="app-dialog-cancel"
           >
             Cancel
           </button>
+          {dialog.kind === 'confirm' && dialog.altLabel && dialog.onAlt && (
+            <button
+              className="flex items-center gap-2 rounded-lg border border-zinc-600 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              onClick={alt}
+              disabled={!!pending}
+              data-testid="app-dialog-alt"
+            >
+              {pending === 'alt' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {dialog.altLabel}
+            </button>
+          )}
           <button
             className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 ${
               dialog.kind === 'confirm' && dialog.danger
@@ -137,13 +171,13 @@ export default function AppDialog() {
                 : 'bg-emerald-600 hover:bg-emerald-500'
             }`}
             onClick={confirm}
-            disabled={submitting || (dialog.kind === 'prompt' && !value.trim())}
+            disabled={!!pending || (dialog.kind === 'prompt' && !value.trim())}
             // commit-creating dialogs opt in — hovering the confirm previews
             // the would-be commit as the dashed ghost above its target sha
             data-ghost-preview={dialog.ghostPreview ?? undefined}
             data-testid="app-dialog-confirm"
           >
-            {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {pending === 'confirm' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {dialog.confirmLabel ?? (dialog.kind === 'prompt' ? 'OK' : 'Confirm')}
           </button>
         </div>

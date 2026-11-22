@@ -67,10 +67,63 @@ pub async fn commit(
     run_git_with_stdin(&w, &args, message, GitKind::Mutation).await.map(|_| ())
 }
 
-pub async fn checkout(repo: &str, ref_name: &str, remote: Option<&str>) -> Result<(), super::errors::GitError> {
+/// What to do with uncommitted changes when switching branches (the client
+/// asks the user first when the worktree is dirty): Bring = stash →
+/// checkout → pop, so the changes follow to the target branch; Stash =
+/// stash → checkout, leaving them on the stash stack.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+pub enum CarryChanges {
+    #[serde(rename = "bring")]
+    Bring,
+    #[serde(rename = "stash")]
+    Stash,
+}
+
+pub async fn checkout(
+    repo: &str,
+    ref_name: &str,
+    remote: Option<&str>,
+    carry: Option<CarryChanges>,
+) -> Result<(), super::errors::GitError> {
     let w = repo_or_err(repo)?;
+    // stash the dirty state first when asked — remember whether a stash
+    // entry actually got created ("no local changes to save" exits 0 but
+    // stashes nothing; popping then would grab an OLDER entry or fail)
+    let stashed = match carry {
+        Some(_) => stash_if_dirty(&w).await?,
+        None => false,
+    };
+    if let Err(e) = do_checkout(&w, ref_name, remote).await {
+        // checkout refused — pop the stash back so the worktree is exactly
+        // as it was (best effort: the original error matters more)
+        if stashed {
+            let _ = super::stash::apply(repo, 0, true).await;
+        }
+        return Err(e);
+    }
+    if carry == Some(CarryChanges::Bring) && stashed {
+        super::stash::apply(repo, 0, true).await.map_err(|e| {
+            super::errors::GitError::new(
+                "stash-conflict",
+                format!(
+                    "Checked out {}, but restoring your stashed changes conflicted — resolve them in the staging area; the stash entry is kept.",
+                    ref_name
+                ),
+                "stash pop",
+                e.stderr,
+            )
+        })?;
+    }
+    Ok(())
+}
+
+async fn do_checkout(
+    w: &std::path::Path,
+    ref_name: &str,
+    remote: Option<&str>,
+) -> Result<(), super::errors::GitError> {
     match remote {
-        None => run_git(&w, &["checkout".into(), ref_name.to_string()], GitKind::Mutation).await.map(|_| ()),
+        None => run_git(w, &["checkout".into(), ref_name.to_string()], GitKind::Mutation).await.map(|_| ()),
         Some(remote) => {
             // remote branch → create local tracking branch
             let local = ref_name
@@ -83,9 +136,42 @@ pub async fn checkout(repo: &str, ref_name: &str, remote: Option<&str>) -> Resul
                 "--track".into(),
                 format!("{}/{}", remote, local),
             ];
-            run_git(&w, &args, GitKind::Mutation).await.map(|_| ())
+            run_git(w, &args, GitKind::Mutation).await.map(|_| ())
         }
     }
+}
+
+/// `git stash push --include-untracked`, reporting whether a NEW stash entry
+/// was actually created (refs/stash moved) — guards the pop that follows a
+/// "bring" carry and the undo-pop when the checkout refuses.
+async fn stash_if_dirty(w: &std::path::Path) -> Result<bool, super::errors::GitError> {
+    let before = stash_tip(w).await;
+    run_git(
+        w,
+        &[
+            "stash".into(),
+            "push".into(),
+            "--include-untracked".into(),
+            "--message".into(),
+            "sirgit: checkout".into(),
+        ],
+        GitKind::Mutation,
+    )
+    .await?;
+    let after = stash_tip(w).await;
+    Ok(after.is_some() && after != before)
+}
+
+async fn stash_tip(w: &std::path::Path) -> Option<String> {
+    run_git(
+        w,
+        &["rev-parse".into(), "-q".into(), "--verify".into(), "refs/stash".into()],
+        GitKind::ReadOnly,
+    )
+    .await
+    .ok()
+    .map(|o| o.stdout.trim().to_string())
+    .filter(|s| !s.is_empty())
 }
 
 /// Drop the last commit of the current branch, keeping its changes staged.
@@ -795,6 +881,77 @@ mod tests {
         assert_eq!(b64_url(b"fo"), "Zm8-");
         assert_eq!(b64_url(b"foo"), "Zm9v");
         assert_eq!(b64_url(b"foobar"), "Zm9vYmFy");
+    }
+
+    /// checkout carry: a dirty worktree either follows to the target branch
+    /// (Bring = stash → checkout → pop, stash stack empty afterwards) or
+    /// stays on the stack (Stash = stash → checkout, worktree clean); a
+    /// REFUSED checkout pops the stash back (worktree exactly as it was),
+    /// and Bring on a clean tree must not touch the stash at all.
+    #[tokio::test]
+    async fn checkout_carries_or_stashes_dirty_worktree() {
+        let tmp = std::env::temp_dir().join(format!("sirgit-carry-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
+        std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
+        assert!(git(&["add", "."]).status.success());
+        assert!(git(&["commit", "-q", "-m", "c1"]).status.success());
+        assert!(git(&["branch", "other"]).status.success());
+        let stash_count = || {
+            String::from_utf8_lossy(&git(&["stash", "list"]).stdout)
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count()
+        };
+        let head = || String::from_utf8_lossy(&git(&["symbolic-ref", "--short", "HEAD"]).stdout).trim().to_string();
+        let p = tmp.to_str().unwrap();
+
+        // BRING: dirty tracked file follows to the other branch, stash empty
+        std::fs::write(tmp.join("a.txt"), "dirty\n").unwrap();
+        checkout(p, "other", None, Some(CarryChanges::Bring)).await.unwrap();
+        assert_eq!(head(), "other");
+        assert_eq!(std::fs::read_to_string(tmp.join("a.txt")).unwrap(), "dirty\n", "changes must follow a Bring carry");
+        assert_eq!(stash_count(), 0, "Bring pops its own stash");
+
+        // STASH: tracked edit + untracked file land on the stack, tree clean
+        std::fs::write(tmp.join("a.txt"), "dirty2\n").unwrap();
+        std::fs::write(tmp.join("new.txt"), "untracked\n").unwrap();
+        checkout(p, "main", None, Some(CarryChanges::Stash)).await.unwrap();
+        assert_eq!(head(), "main");
+        assert_eq!(std::fs::read_to_string(tmp.join("a.txt")).unwrap(), "one\n", "Stash leaves the target branch clean");
+        assert!(!tmp.join("new.txt").exists(), "untracked files are stashed too (-u)");
+        assert_eq!(stash_count(), 1, "Stash keeps the entry");
+        // the entry round-trips: pop restores both files
+        assert!(git(&["stash", "pop", "-q"]).status.success());
+        assert_eq!(std::fs::read_to_string(tmp.join("a.txt")).unwrap(), "dirty2\n");
+        assert_eq!(std::fs::read_to_string(tmp.join("new.txt")).unwrap(), "untracked\n");
+
+        // REFUSED checkout: pop-back restores the worktree, nothing stashed
+        checkout(p, "does-not-exist", None, Some(CarryChanges::Bring)).await.unwrap_err();
+        assert_eq!(head(), "main", "refused checkout must not move HEAD");
+        assert_eq!(std::fs::read_to_string(tmp.join("a.txt")).unwrap(), "dirty2\n", "refused checkout must restore the dirty file");
+        assert_eq!(stash_count(), 0, "the undo-pop must drop its own stash");
+
+        // BRING on a clean tree: no stash created, nothing popped
+        assert!(git(&["checkout", "-q", "--", "."]).status.success()); // clean the tree (discard)
+        checkout(p, "other", None, Some(CarryChanges::Bring)).await.unwrap();
+        assert_eq!(head(), "other");
+        assert_eq!(stash_count(), 0, "clean tree + Bring must not touch the stash");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Moving a tag repoints it WITHOUT flattening the annotation

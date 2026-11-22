@@ -15,7 +15,14 @@ import { friendlyError } from '../../lib/gitErrors'
  * carries the branch-list filter (all | track | untrack | recent) — SIDEBAR-ONLY:
  * the graph map always shows every branch.
  */
-export default function RefsPanel({ path }: { path: string }) {
+export default function RefsPanel({
+  path,
+  onCheckout,
+}: {
+  path: string
+  /** guarded checkout (RepoPage): a dirty worktree asks bring/stash first */
+  onCheckout: (name: string, trackFrom?: string) => void
+}) {
   const width = useUiStore((s2) => s2.refsPanelWidth)
   const collapsed = useUiStore((s2) => s2.refsPanelCollapsed)
   const setWidth = useUiStore((s2) => s2.setRefsPanelWidth)
@@ -234,11 +241,7 @@ export default function RefsPanel({ path }: { path: string }) {
             disabled={refOpBusy}
             onClick={() => useUiStore.getState().select(b.sha, { kind: 'branch', name: b.name })}
             onDoubleClick={() => {
-              if (head?.branch !== b.name)
-                opMut.mutate(async () => {
-                  await api.checkout(path, b.name)
-                  useUiStore.getState().requestScrollTo(b.sha)
-                })
+              if (head?.branch !== b.name) onCheckout(b.name)
             }}
             onRename={() => {
               useUiStore.getState().setDialog({
@@ -299,10 +302,11 @@ export default function RefsPanel({ path }: { path: string }) {
                     title: 'Checkout remote branch',
                     message: `Create local branch "${localName}" tracking ${b.name} and check it out?`,
                     confirmLabel: 'Checkout',
-                    onConfirm: () => opMut.mutate(() => api.checkout(path, localName, remote)),
+                    // a dirty worktree asks bring/stash next (chained dialog)
+                    onConfirm: () => Promise.resolve(onCheckout(localName, remote)),
                   })
                 } else {
-                  opMut.mutate(() => api.checkout(path, localName))
+                  onCheckout(localName)
                 }
               }}
               onDelete={() => {
@@ -336,12 +340,7 @@ export default function RefsPanel({ path }: { path: string }) {
             refKind="tag"
             disabled={refOpBusy}
             onClick={() => useUiStore.getState().select(t.sha, { kind: 'tag', name: t.name })}
-            onDoubleClick={() =>
-              opMut.mutate(async () => {
-                await api.checkout(path, t.name)
-                useUiStore.getState().requestScrollTo(t.sha)
-              })
-            }
+              onDoubleClick={() => onCheckout(t.name)}
             onRename={() => {
               useUiStore.getState().setDialog({
                 kind: 'prompt',

@@ -21,6 +21,9 @@ export type AppDialog =
       danger?: boolean
       /** returning a Promise keeps the dialog open with a spinner until it settles */
       onConfirm: () => void | Promise<unknown>
+      /** optional THIRD choice (checkout-with-changes: Confirm = bring, alt = stash) */
+      altLabel?: string
+      onAlt?: () => void | Promise<unknown>
       /** commit-creating op: its target sha — hovering the confirm previews the ghost node above it */
       ghostPreview?: string
     }

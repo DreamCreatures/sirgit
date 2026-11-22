@@ -20,6 +20,8 @@ export interface SelectionActionsProps {
   remoteBranchNames: string[]
   /** local branch names — a remote checkout whose local exists is a plain checkout */
   localBranchNames: string[]
+  /** guarded checkout (RepoPage): a dirty worktree asks bring/stash first */
+  onCheckout: (name: string, trackFrom?: string) => void
   /** remote checkout with fast-forward semantics — RepoPage's shared handler */
   onCheckoutRemote: (remoteRef: string) => void
   currentBranch?: string
@@ -34,6 +36,7 @@ export function SelectionActions({
   selectedRef,
   remoteBranchNames,
   localBranchNames,
+  onCheckout,
   onCheckoutRemote,
   currentBranch,
   headSha,
@@ -253,7 +256,7 @@ export function SelectionActions({
             <button
               className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
               title={`Checkout ${selBranch.name}`}
-              onClick={() => run(() => api.checkout(path, selBranch.name))}
+              onClick={() => onCheckout(selBranch.name)}
             >
               <CornerUpLeft className="h-3.5 w-3.5" /> Checkout
             </button>
@@ -396,7 +399,7 @@ export function SelectionActions({
           <button
             className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
             title={`Checkout ${selTag.name} (detached HEAD)`}
-            onClick={() => run(() => api.checkout(path, selTag.name))}
+            onClick={() => onCheckout(selTag.name)}
           >
             <CornerUpLeft className="h-3.5 w-3.5" /> Checkout
           </button>

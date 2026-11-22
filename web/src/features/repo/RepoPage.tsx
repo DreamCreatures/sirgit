@@ -446,12 +446,15 @@ export default function RepoPage() {
     }
   }
 
-  // double-click checkout on branch chips (same op as the action-bar button);
-  // trackFrom set → the branch is CREATED tracking that remote ref first
-  const checkoutBranch = (name: string, trackFrom?: string) => {
+  // the checkout runner every path funnels into (chips, sidebar rows, action
+  // bar). carry set = the user answered the dirty-worktree dialog: the server
+  // stashes first, checks out, and pops again for 'bring'. quiet = the dialog
+  // path — errors propagate to AppDialog's inline slot instead of a toast.
+  // trackFrom set → the branch is CREATED tracking that remote ref first.
+  const checkoutBranch = (name: string, trackFrom?: string, carry?: 'bring' | 'stash', quiet = false): Promise<void> => {
     useUiStore.getState().beginOp('Checkout')
-    void api
-      .checkout(path, name, trackFrom)
+    return api
+      .checkout(path, name, trackFrom, carry)
       .then(() => {
         toast({ kind: 'success', title: `Checked out ${name}` })
         // bring the new HEAD into view — the tip may sit far off-screen
@@ -464,10 +467,37 @@ export default function RepoPage() {
       })
       .catch((e: unknown) => {
         const { title, detail } = friendlyError(e)
-        toast({ kind: 'error', title, detail })
+        if (!quiet) toast({ kind: 'error', title, detail })
         refreshAll()
+        if (quiet) throw e
       })
       .finally(() => useUiStore.getState().endOp())
+  }
+
+  // guarded checkout entry: a DIRTY worktree asks what to do with the
+  // uncommitted changes before git acts — bring them along
+  // (stash → checkout → pop), stash them and leave them (stash → checkout),
+  // or cancel and stay. Clean worktree (or a merge/rebase in flight, where
+  // checkout would be refused anyway) goes straight through.
+  const guardedCheckout = (name: string, trackFrom?: string) => {
+    const inProgress =
+      !!statusSnap && (statusSnap.inMerge || statusSnap.inRebase || statusSnap.inCherry || statusSnap.inRevert)
+    if (!statusSnap || statusSnap.files.length === 0 || inProgress) {
+      void checkoutBranch(name, trackFrom)
+      return
+    }
+    useUiStore.getState().setDialog({
+      kind: 'confirm',
+      title: `Check out ${name}?`,
+      message:
+        'You have uncommitted changes.\n\n' +
+        'Bring changes — stash, check out, then restore them on the new branch (a conflicting restore pauses in the staging area; the stash is kept).\n' +
+        'Stash — check out and leave the changes on the stash stack.',
+      confirmLabel: 'Bring changes',
+      altLabel: 'Stash',
+      onConfirm: () => checkoutBranch(name, trackFrom, 'bring', true),
+      onAlt: () => checkoutBranch(name, trackFrom, 'stash', true),
+    })
   }
 
   // remote chip double-click / popup Checkout = "take me to what I'm pointing
@@ -484,7 +514,8 @@ export default function RepoPage() {
         title: 'Checkout remote branch',
         message: `Create local branch "${local}" tracking ${remoteRef} and check it out?`,
         confirmLabel: 'Checkout',
-        onConfirm: () => checkoutBranch(local, remoteRef),
+        // a dirty worktree asks bring/stash next (chained dialog)
+        onConfirm: () => Promise.resolve(guardedCheckout(local, remoteRef)),
       })
       return
     }
@@ -501,7 +532,7 @@ export default function RepoPage() {
         return
       }
     } else if (hasAll) {
-      checkoutBranch(local) // local already has everything — just switch to it
+      guardedCheckout(local) // local already has everything — just switch to it
       return
     }
     const run = (reset: boolean) => {
@@ -656,7 +687,7 @@ export default function RepoPage() {
 
       {/* body — commit drawer is an absolute overlay anchored here, so the graph keeps its full width */}
       <div className="relative flex min-h-0 flex-1">
-        <RefsPanel path={path} />
+        <RefsPanel path={path} onCheckout={guardedCheckout} />
         <main className="flex min-w-0 flex-1 flex-col">
           <StagingPanel path={path} headSha={refs?.head?.sha} headBranch={currentBranch} />
           <div className="relative min-h-0 flex-1">
@@ -671,7 +702,7 @@ export default function RepoPage() {
               selectedRef={selectedRef}
               onNodeClick={handleNodeClick}
               onCheckout={(name) =>
-            refs?.remoteBranches.some((r) => r.name === name) ? checkoutRemoteRef(name) : checkoutBranch(name)
+            refs?.remoteBranches.some((r) => r.name === name) ? checkoutRemoteRef(name) : guardedCheckout(name)
           }
               armedRef={armedRef}
               onRowAction={onRowAction}
@@ -685,6 +716,7 @@ export default function RepoPage() {
                   selectedRef={selectedRef}
                   remoteBranchNames={refs?.remoteBranches.map((r) => r.name) ?? []}
                   localBranchNames={refs?.branches.map((b) => b.name) ?? []}
+                  onCheckout={guardedCheckout}
                   onCheckoutRemote={checkoutRemoteRef}
                   currentBranch={currentBranch}
                   headSha={refs?.head?.sha}

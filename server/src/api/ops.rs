@@ -111,6 +111,10 @@ pub struct CheckoutParams {
     pub ref_name: String,
     #[serde(default)]
     pub remote: Option<String>,
+    /// set when the client asked what to do with uncommitted changes:
+    /// bring = stash → checkout → pop; stash = stash → checkout
+    #[serde(default)]
+    pub carry: Option<ops::CarryChanges>,
 }
 
 #[derive(Deserialize)]
@@ -280,7 +284,7 @@ pub async fn commit(State(app): State<Arc<AppState>>, Json(p): Json<CommitParams
 
 pub async fn checkout(State(app): State<Arc<AppState>>, Json(p): Json<CheckoutParams>) -> ApiResult<Json<serde_json::Value>> {
     let (_st, _g) = locked(&app, &p.path).await?;
-    ops::checkout(&p.path, &p.ref_name, p.remote.as_deref())
+    ops::checkout(&p.path, &p.ref_name, p.remote.as_deref(), p.carry)
         .await
         .map_err(ApiError::Git)?;
     _st.bump(&["refs", "index", "worktree"]);

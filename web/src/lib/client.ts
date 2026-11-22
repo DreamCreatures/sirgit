@@ -114,8 +114,8 @@ export const api = {
     post('/discard', { path, files, untracked }),
   commit: (path: string, message: string, amend = false, allowEmpty = false) =>
     post('/commit', { path, message, amend, allowEmpty }),
-  checkout: (path: string, ref: string, remote?: string) =>
-    post('/checkout', { path, ref, remote }),
+  checkout: (path: string, ref: string, remote?: string, carry?: 'bring' | 'stash') =>
+    post('/checkout', { path, ref, remote, carry }),
   branchCreate: (path: string, name: string, sha: string, checkout = false) =>
     post('/branch/create', { path, name, sha, checkout }),
   branchDelete: (path: string, name: string, force = false) =>
