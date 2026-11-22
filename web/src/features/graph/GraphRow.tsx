@@ -254,7 +254,7 @@ function GraphRowInner({
 
   return (
     <div
-      className={`group flex h-full items-center border-b border-zinc-900/80 pr-4 transition-all ${
+      className={`group flex h-full items-center pr-4 transition-all ${
         dimmed ? 'opacity-20' : ''
       } ${dragOver ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/50' : selected ? 'bg-zinc-800/60' : 'hover:bg-zinc-900/60'}`}
       onDragOver={onDragOver}

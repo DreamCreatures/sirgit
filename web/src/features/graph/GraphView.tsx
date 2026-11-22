@@ -683,10 +683,11 @@ function PreviewOverlay({
 
 
 /**
- * Floating action popup rendered directly ON the selected row (vertical
- * center) so sibling commits above/below stay selectable. Horizontally it
- * sits just right of the selected branch chip — covering the branch only as
- * a fallback when the chip is too far right to fit. Rendered through a
+ * Floating action popup rendered on the row ABOVE the selected one, its left
+ * edge aligned with the selected chip — the grown action set no longer fits
+ * beside a 3rd/4th chip, and spanning the row above keeps the selected row
+ * and its siblings fully clickable. Flips BELOW the row only when there is
+ * no room above (selected row at the viewport top). Rendered through a
  * portal at fixed viewport coordinates so no sibling panel (drawer, sidebar)
  * can clip it; re-anchors on scroll, clamps inside the viewport, and
  * dismisses on outside click.
@@ -720,7 +721,7 @@ function ActionPopup({
   const ref = useRef<HTMLDivElement>(null)
   const [popupH, setPopupH] = useState(44)
 
-  // measure real height (button rows can wrap) for exact centering + clamping
+  // measure real height (wrapped button rows) for above/below placement + clamping
   useLayoutEffect(() => {
     if (ref.current) setPopupH(ref.current.offsetHeight)
   })
@@ -749,35 +750,37 @@ function ActionPopup({
   const container = scrollRef.current
   if (!container) return null
   const rect = container.getBoundingClientRect()
-  const rowCenterY = rect.top + index * ROW_H + topOffset - scrollTop + ROW_H / 2
-  let top = rowCenterY - popupH / 2
-  top = Math.min(Math.max(top, rect.top + 4), rect.bottom - popupH - 4)
+  const rowTopY = rect.top + index * ROW_H + topOffset - scrollTop
+  // rest the bar on the row ABOVE the selected one (6px gap); flip below
+  // when that would leave the container (selected row at the viewport top)
+  let top = rowTopY - popupH - 6
+  if (top < rect.top + 4) {
+    top = Math.min(rowTopY + ROW_H + 6, rect.bottom - popupH - 4)
+    top = Math.max(top, rect.top + 4)
+  }
 
-  // horizontal: sibling spacing right of the SELECTED chip — a tag pick
-  // anchors beside the tag (even on the node's far side), a branch pick
-  // beside its chip; a plain node pick (no ref) anchors after the row's
-  // last chip; overflow overlays the anchor chip, last resort = node side
+  // horizontal: left edge aligned with the SELECTED chip (a tag pick aligns
+  // to the tag, even on the node's far side; a node pick aligns to the
+  // row's last chip) — the bar spans the row above, so it has the full
+  // container width; when the chip sits too far right, slide the bar left
+  // to keep a 300px window; last resort = node side
   const laneXBased = rect.left + originX + Math.max(60, laneX(Math.min(laneCount, 6)) + 8)
   const rowEl = container.querySelector(`[data-sha="${sha}"]`)
   const anchorEl = (
     (selectedRef && rowEl?.querySelector(`[data-ref="${selectedRef.kind}:${selectedRef.name}"]`)) ||
     (rowEl ? ([...rowEl.querySelectorAll('[data-testid="graph-ref-chip"]')].pop() as HTMLElement | undefined) : undefined)
   )?.getBoundingClientRect?.() ?? null
-  let left = anchorEl ? anchorEl.right + 8 : laneXBased
+  let left = anchorEl ? anchorEl.left : laneXBased
   let maxW = rect.right - left - 8
-  if (maxW < 300 && anchorEl) {
-    left = anchorEl.left
+  if (maxW < 300) {
+    left = Math.max(rect.left + 8, rect.right - 300 - 8)
     maxW = rect.right - left - 8
-  }
-  if (maxW < 220) {
-    left = laneXBased
-    maxW = window.innerWidth - left - (window.innerWidth - rect.right) - 12
   }
 
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-40 flex items-center gap-1.5 rounded-lg border border-zinc-600 bg-zinc-900 px-2 py-1.5 shadow-2xl"
+      className="fixed z-40 flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-600 bg-zinc-900 px-2 py-1.5 shadow-2xl"
       style={{ top, left, maxWidth: Math.max(220, maxW) }}
       data-testid="selection-popup"
     >
