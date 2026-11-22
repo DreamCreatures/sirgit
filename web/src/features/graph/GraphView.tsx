@@ -20,8 +20,10 @@ export function laneX(lane: number): number {
 
 interface GraphViewProps {
   refBySha: Map<string, RefInfo[]>
-  /** tag names known to be on the remote (ls-remote cache) — og/<tag> chips */
+  /** tag names known to be on the remote (ls-remote cache) — pushed-tag chips */
   remoteTags?: string[]
+  /** the remote those tags came from — pushed-tag prefixes name the real remote */
+  remoteTagRemote?: string | null
   headSha: string | null
   /** show the dashed prospective-commit node above HEAD (staged changes / in-flight merge-rebase) */
   nextCommit?: boolean
@@ -53,6 +55,7 @@ interface GraphViewProps {
 export default function GraphView({
   refBySha,
   remoteTags,
+  remoteTagRemote,
   headSha,
   nextCommit,
   ghostTarget,
@@ -233,6 +236,7 @@ export default function GraphView({
               lane={laneLayout.lanes.get(row.sha) ?? 0}
               refs={refBySha.get(row.sha)}
               remoteTags={remoteTags}
+              remoteTagRemote={remoteTagRemote}
               isHead={headSha === row.sha}
               currentBranch={currentBranch}
               selectedRef={selectedRef}
@@ -297,6 +301,7 @@ const RowWrapper = memo(function RowWrapper({
   lane,
   refs,
   remoteTags,
+  remoteTagRemote,
   isHead,
   currentBranch,
   selectedRef,
@@ -315,6 +320,7 @@ const RowWrapper = memo(function RowWrapper({
   lane: number
   refs?: RefInfo[]
   remoteTags?: string[]
+  remoteTagRemote?: string | null
   isHead: boolean
   currentBranch?: string
   selectedRef?: SelectedRef | null
@@ -338,6 +344,7 @@ const RowWrapper = memo(function RowWrapper({
         lane={lane}
         refs={refs}
         remoteTags={remoteTags}
+        remoteTagRemote={remoteTagRemote}
         isHead={isHead}
         currentBranch={currentBranch}
         selectedRef={selectedRef}

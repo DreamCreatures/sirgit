@@ -2,6 +2,7 @@ import { memo, useState, type DragEvent, type ReactNode } from 'react'
 import { GitBranch, Tag } from 'lucide-react'
 import type { CommitRow, RefInfo } from '../../lib/types'
 import { relTime } from '../../lib/time'
+import { abbrevRemote, abbrevRemoteRef } from '../../lib/remoteLabel'
 import { useGraphStore } from '../../state/graphStore'
 import { ROW_H, laneX } from './GraphView'
 import { laneColor } from './GraphEdges'
@@ -33,8 +34,10 @@ interface GraphRowProps {
   row: CommitRow
   lane: number
   refs?: RefInfo[]
-  /** tag names known to be on the remote — pushed tags render as og/<tag> */
+  /** tag names known to be on the remote — pushed tags render as <remote-abbrev>/<tag> */
   remoteTags?: string[]
+  /** the remote the remoteTags cache came from (raw name — the pushed-tag prefix) */
+  remoteTagRemote?: string | null
   isHead: boolean
   /** the checked-out branch — the only chip allowed to say (HEAD) */
   currentBranch?: string
@@ -59,7 +62,7 @@ interface GraphRowProps {
   onMoveBranch?: (branch: string, targetSha: string) => void
 }
 
-const MAX_CHIPS = 4 // [tag][branch][og/twin][branch] fits before the +N chip
+const MAX_CHIPS = 4 // [tag][branch][ori/twin][branch] fits before the +N chip
 const DRAG_TYPE = 'application/x-sirgit-move'
 /** symmetric svg padding around the node circle — keeps the circle centered
  *  exactly on the lane axis so edges run through its center (the HEAD ring
@@ -81,6 +84,7 @@ function GraphRowInner({
   lane,
   refs,
   remoteTags,
+  remoteTagRemote,
   isHead,
   currentBranch,
   selected,
@@ -98,16 +102,21 @@ function GraphRowInner({
   // plain commits stay smallest
   const r = isHead ? 15 : (refs?.some((rf) => rf.type === 'branch' && !rf.name.includes('/')) === true) ? 10 : 8
   const chips = refs ?? []
-  // Chip order: [tags…][branch, its origin twin, branch, …][orphan remotes].
+  // Chip order: [tags…][branch, its remote twin, branch, …][orphan remotes].
   // Pushed-tag truth: the server's ls-remote cache (refreshed after every
   // fetch/push/pull) when it has data; before any network op ran through
   // sirgit, fall back to the row heuristic — every chip on a row points at
-  // the SAME commit, so a tag riding a row that carries an origin/* chip is
-  // on the remote. Either way only `og/<tag>` is shown (never both forms,
+  // the SAME commit, so a tag riding a row that carries a remote chip is
+  // on the remote. Either way only the pushed form is shown (never both,
   // unlike branches which keep local + remote visible).
   const knownRemoteTags = remoteTags != null && remoteTags.length > 0
   const rowHasRemote = chips.some((rf) => rf.type === 'remote-branch')
   const tagPushed = (name: string) => (knownRemoteTags ? remoteTags!.includes(name) : rowHasRemote)
+  // the remote a pushed tag's prefix names: the ls-remote cache's remote
+  // when it's authoritative, else the remote chip riding the row
+  const rowRemoteName = chips.find((rf) => rf.type === 'remote-branch')?.name.split('/')[0]
+  const tagRemoteName = knownRemoteTags ? (remoteTagRemote ?? rowRemoteName) : rowRemoteName
+  const tagPrefix = abbrevRemote(tagRemoteName ?? 'origin')
   const tags = chips.filter((rf) => rf.type === 'tag')
   const ordered: typeof chips = []
   const paired = new Set<string>()
@@ -233,18 +242,18 @@ function GraphRowInner({
         </svg>
       </div>
 
-      {/* ref chips, one line: [tags][branch + its og/ twin][orphan remotes].
-       * `og/` is a DISPLAY-only abbreviation of origin/ — selection, drags
-       * and git refspecs all keep the full name via refName. A pushed tag
-       * renders as og/<tag> only. */}
+      {/* ref chips, one line: [tags][branch + its remote twin][orphan remotes].
+       * Remote names abbreviate to 3 letters in LABELS ONLY (origin/main →
+       * ori/main) — selection, drags and git refspecs all keep the full name
+       * via refName. A pushed tag renders as <abbrev>/<tag> only. */}
       <div className="mr-2 flex shrink-0 items-center gap-1" data-testid="row-chips">
         {shown.map((rf) =>
           rf.type === 'tag' ? (
             <Chip
               key={rf.name}
               icon={<Tag className="h-3 w-3" />}
-              label={tagPushed(rf.name) ? `og/${rf.name}` : rf.name}
-              title={tagPushed(rf.name) ? `${rf.name} is on the remote` : undefined}
+              label={tagPushed(rf.name) ? `${tagPrefix}/${rf.name}` : rf.name}
+              title={tagPushed(rf.name) ? `${rf.name} is on ${tagRemoteName ?? 'the remote'}` : undefined}
               className={
                 'bg-amber-400/10 text-amber-300 border-amber-400/30' +
                 (selectedRef?.kind === 'tag' && selectedRef.name === rf.name ? ' ring-1 ring-amber-400/70' : '')
@@ -274,7 +283,8 @@ function GraphRowInner({
             <Chip
               key={rf.name}
               icon={<GitBranch className="h-3 w-3" />}
-              label={rf.name.replace(/^origin\//, 'og/')}
+              label={abbrevRemoteRef(rf.name)}
+              title={rf.name}
               className={
                 'bg-sky-400/10 text-sky-300/80 border-sky-400/20' +
                 (selectedRef?.kind === 'remote-branch' && selectedRef.name === rf.name ? ' ring-1 ring-sky-400/70' : '')
@@ -421,7 +431,7 @@ function Chip({
   sha: string
   /** this chip's ref identity — clicking selects the ref, not just the commit */
   refKind: 'branch' | 'tag' | 'remote-branch'
-  /** raw ref name (label may carry the (HEAD) suffix or the og/ abbreviation) */
+  /** raw ref name (label may carry the (HEAD) suffix or the abbreviated remote) */
   refName: string
   /** set → the chip is a local branch and can be dragged onto another row to move it */
   dragBranch?: string

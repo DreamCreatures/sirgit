@@ -26,8 +26,10 @@ export interface RefsSnapshot {
   branches: RefInfo[]
   remoteBranches: RefInfo[]
   tags: RefInfo[]
-  /** tag names that exist on the remote (ls-remote cache) — drives og/<tag> */
+  /** tag names that exist on the remote (ls-remote cache) — pushed-tag chips */
   remoteTags: string[]
+  /** the remote those tags came from (pushed-tag prefixes name the real remote) */
+  remoteTagsRemote?: string | null
   remotes: string[]
   head: Head
   upstream?: string

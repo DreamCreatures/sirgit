@@ -43,8 +43,12 @@ pub struct RefsSnapshot {
     pub remotes: Vec<String>,
     pub head: Head,
     /// tag names that exist on the remote (ls-remote cache, refreshed after
-    /// every fetch/push/pull) — drives the UI's `og/<tag>` rendering
+    /// every fetch/push/pull) — drives the UI's pushed-tag chips
     pub remote_tags: Vec<String>,
+    /// the remote those tags were last fetched from — the pushed-tag prefix
+    /// names the actual remote (origin is a name, not a keyword)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_tags_remote: Option<String>,
     /// Short upstream name of the current branch (e.g. "origin/main"), if any
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
@@ -150,9 +154,9 @@ pub async fn read_refs(path: &str) -> Result<RefsSnapshot, super::errors::GitErr
         }
     }
 
-    let remote_tags = super::remote_tags::read_cached(&gitdir);
+    let tag_cache = super::remote_tags::read_cached(&gitdir);
 
-    Ok(RefsSnapshot { branches, remote_branches, tags, remotes, head, remote_tags, upstream, ahead, behind })
+    Ok(RefsSnapshot { branches, remote_branches, tags, remotes, head, remote_tags: tag_cache.tags, remote_tags_remote: tag_cache.remote, upstream, ahead, behind })
 }
 
 pub async fn read_remotes(worktree: &Path) -> Result<Vec<String>, super::errors::GitError> {

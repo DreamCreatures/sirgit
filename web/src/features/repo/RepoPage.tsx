@@ -492,6 +492,7 @@ export default function RepoPage() {
             <GraphView
               refBySha={refBySha}
           remoteTags={refs?.remoteTags ?? []}
+          remoteTagRemote={refs?.remoteTagsRemote ?? null}
               headSha={refs?.head?.sha ?? null}
               nextCommit={nextCommit}
               ghostTarget={ghostPreview}
