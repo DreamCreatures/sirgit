@@ -417,7 +417,7 @@ function GraphRowInner({
           data-testid="row-move-button"
           data-action-preview="move"
         >
-          {'<- move'} {armed.name}
+          move to
         </button>
       )}
 
