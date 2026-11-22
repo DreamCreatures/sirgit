@@ -115,9 +115,12 @@ function GraphRowInner({
   // NODE reveals it (row-hover pops nothing)
   const subjectCompact = useUiStore((s) => s.subjectCompact)
   const [nodeHovered, setNodeHovered] = useState(false)
-  // compact mode also fades the author/time/sha meta on every row — no reveal
-  // at all: the node-hover peek shows the commit message ONLY (user rule)
-  const metaHide = subjectCompact ? ' opacity-0 transition-opacity duration-100' : ''
+  // compact mode also removes the author/time/sha meta on every row — no
+  // reveal at all (the node-hover peek shows the commit message ONLY).
+  // display:none, not opacity: hidden-but-present meta would eat the corridor
+  // between the message and the node on mirrored-left rows, pushing the
+  // revealed message far from the node
+  const metaHide = subjectCompact ? ' hidden' : ''
   const subjectHide = subjectCompact && !isHead
     ? nodeHovered
       ? ' opacity-100 transition-opacity duration-100'
