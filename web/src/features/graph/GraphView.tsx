@@ -129,10 +129,22 @@ export default function GraphView({
   const ghostLane = ghostIdx >= 0 ? (laneLayout.lanes.get(ghostSha!) ?? -1) : -1
   const showGhost = ghostIdx >= 0 && ghostLane >= 0
   const ghostOffset = totalRows > 0 ? ROW_H : 0
-  const ghostTop = ghostIdx <= 0 ? 0 : (ghostIdx - 1) * ROW_H + ghostOffset
-  const contentH = totalRows * ROW_H + ghostOffset
+  // --- selection gap: while a row's action popup is up, that row pushes
+  // itself and everything below one ROW_H down — the bar floats in the
+  // opened gap instead of over the row ABOVE, which is exactly the
+  // move/drag target the selection exists to act on ("distance between
+  // sibling nodes increases 100%", per the user). All index→y math goes
+  // through rowTop so rows, edges, ghost, tether and previews agree. ---
+  const popupActive =
+    !!renderActions && selectedSha != null && detailsSha !== selectedSha && ordered.some((r) => r.sha === selectedSha)
+  const selGapIdx = popupActive ? ordered.findIndex((r) => r.sha === selectedSha) : -1
+  const rowTop = (i: number) => i * ROW_H + ghostOffset + (selGapIdx >= 0 && i >= selGapIdx ? ROW_H : 0)
+  const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H : rowTop(ghostIdx - 1)
+  const contentH = totalRows * ROW_H + ghostOffset + (selGapIdx >= 0 ? ROW_H : 0)
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
-  const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
+  // +1 window row at the bottom when the gap shifts rows down out of the
+  // uniform-height assumption
+  const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN + (selGapIdx >= 0 ? 1 : 0))
 
   // tree layout centers the TRUNK itself (the checked-out branch's column),
   // not the whole lane band: merge-heavy repos accumulate hundreds of
@@ -154,7 +166,7 @@ export default function GraphView({
       ? Math.max(0, Math.floor(viewportW / 2) - laneX(trunkLane))
       : LEFT_TAG_PAD
   const showTether = headIdx >= 0 && headLane >= 0 && !ghostSha
-  const headCenterY = headIdx * ROW_H + ghostOffset + ROW_H / 2
+  const headCenterY = rowTop(headIdx) + ROW_H / 2
   const tetherCx = originX + laneX(headLane)
   // two regimes: HEAD at/below the viewport top → circle clamps between the
   // reserved top slot and one row above HEAD (pinned to the viewport top
@@ -223,7 +235,7 @@ export default function GraphView({
     }
     const el = scrollRef.current
     if (el) {
-      const target = Math.max(0, idx * ROW_H + ghostOffset - el.clientHeight / 2 + ROW_H / 2)
+      const target = Math.max(0, rowTop(idx) - el.clientHeight / 2 + ROW_H / 2)
       el.scrollTo({ top: target, behavior: 'smooth' })
     }
     useUiStore.getState().clearScrollTo()
@@ -278,7 +290,7 @@ export default function GraphView({
             </svg>
           </div>
         )}
-        <GraphEdges start={start} end={end} offset={ghostOffset} dim={spotlight} originX={originX} />
+        <GraphEdges start={start} end={end} offset={ghostOffset} gapAfter={selGapIdx} dim={spotlight} originX={originX} />
         {visibleRows.map((row, i) => {
           const idx = start + i
           const rowLane = laneLayout.lanes.get(row.sha) ?? 0
@@ -287,7 +299,7 @@ export default function GraphView({
               key={row.sha}
               row={row}
               index={idx}
-              topOffset={ghostOffset}
+              topOffset={ghostOffset + (selGapIdx >= 0 && idx >= selGapIdx ? ROW_H : 0)}
               lane={rowLane}
               originX={originX}
               tagSide={
@@ -315,7 +327,7 @@ export default function GraphView({
           )
         })}
         {preview && (
-          <PreviewOverlay preview={preview} run={previewRun} ordered={ordered} lanes={laneLayout.lanes} topOffset={ghostOffset} originX={originX} />
+          <PreviewOverlay preview={preview} run={previewRun} ordered={ordered} lanes={laneLayout.lanes} rowTop={rowTop} originX={originX} />
         )}
         {/* HEAD tether paints above the rows so the guide line reads over
          * hover backgrounds — nothing else renders in HEAD's lane above the
@@ -380,13 +392,14 @@ export default function GraphView({
             )}
           </div>
         )}
-        {renderActions && selectedSha && detailsSha !== selectedSha && ordered.some((r) => r.sha === selectedSha) && (
+        {popupActive && selectedSha && (
           <ActionPopup
             key={selectedSha}
             sha={selectedSha}
             selectedRef={selectedRef}
             index={ordered.findIndex((r) => r.sha === selectedSha)}
             topOffset={ghostOffset}
+            gapAbove={selGapIdx >= 0 ? ROW_H : 0}
             laneCount={laneLayout.laneCount}
             originX={originX}
             scrollRef={scrollRef}
@@ -527,14 +540,15 @@ function PreviewOverlay({
   run,
   ordered,
   lanes,
-  topOffset,
+  rowTop,
   originX,
 }: {
   preview: { op: 'move' | 'rebase' | 'squash' | 'merge' | 'squash-merge'; targetSha: string; subjectTipSha: string; subjectBranch: string }
   run: string[]
   ordered: import('../../lib/types').CommitRow[]
   lanes: Map<string, number>
-  topOffset: number
+  /** row index → content y (includes the ghost offset and the selection gap) */
+  rowTop: (i: number) => number
   /** lane-band centering shift (tree layout) — every x is laneX + originX */
   originX: number
 }) {
@@ -549,7 +563,7 @@ function PreviewOverlay({
     return (
       <div
         className="pointer-events-none absolute"
-        style={{ left: lx(laneOf(sha)) - 18, top: idx * ROW_H + topOffset + (ROW_H - 36) / 2, width: 36, height: 36 }}
+        style={{ left: lx(laneOf(sha)) - 18, top: rowTop(idx) + (ROW_H - 36) / 2, width: 36, height: 36 }}
         data-testid="preview-ring"
       >
         <svg width={36} height={36}>
@@ -570,7 +584,7 @@ function PreviewOverlay({
 
   // squash: the ghosted single replacement commit above the target
   const ghostIdx = preview.op === 'squash' ? targetIdx : -1
-  const ghostTop = ghostIdx <= 0 ? 0 : (ghostIdx - 1) * ROW_H + topOffset
+  const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H : rowTop(ghostIdx - 1)
 
   return (
     <>
@@ -588,7 +602,7 @@ function PreviewOverlay({
             // circle i sits i rows above the target; clamp at the reserved top slot
             const row = Math.max(0, targetIdx - (i + 1))
             const cx = lx(targetLane)
-            const cy = row * ROW_H + topOffset + ROW_H / 2
+            const cy = rowTop(row) + ROW_H / 2
             return (
               <div key={sha}>
                 <div
@@ -611,7 +625,7 @@ function PreviewOverlay({
           {capped && (
             <div
               className="pointer-events-none absolute rounded-full border border-violet-500/40 bg-violet-500/10 px-1.5 text-[10px] text-violet-300"
-              style={{ left: lx(targetLane) + 14, top: Math.max(0, targetIdx - PREVIEW_CAP) * ROW_H + topOffset + ROW_H / 2 - 8 }}
+              style={{ left: lx(targetLane) + 14, top: rowTop(Math.max(0, targetIdx - PREVIEW_CAP)) + ROW_H / 2 - 8 }}
             >
               +{run.length - PREVIEW_CAP} more
             </div>
@@ -651,9 +665,9 @@ function PreviewOverlay({
           if (intoIdx < 0 || tipIdx < 0) return null
           // ghost circle center — mirrors GraphView's ghost anchoring
           const gx = lx(laneOf(preview.targetSha))
-          const gy = (intoIdx <= 0 ? 0 : (intoIdx - 1) * ROW_H + topOffset) + ROW_H / 2
+          const gy = (intoIdx <= 0 ? rowTop(0) - ROW_H : rowTop(intoIdx - 1)) + ROW_H / 2
           const tx = lx(laneOf(preview.subjectTipSha))
-          const ty = tipIdx * ROW_H + topOffset + ROW_H / 2
+          const ty = rowTop(tipIdx) + ROW_H / 2
           const left = Math.min(gx, tx) - 24
           const top = Math.min(gy, ty) - 24
           return (
@@ -697,6 +711,7 @@ function ActionPopup({
   selectedRef,
   index,
   topOffset,
+  gapAbove,
   laneCount,
   originX,
   scrollRef,
@@ -710,6 +725,8 @@ function ActionPopup({
   index: number
   /** the ghost next-commit row shifts row positions down */
   topOffset: number
+  /** the selection gap opened above this row — the bar floats inside it */
+  gapAbove: number
   laneCount: number
   /** lane-band centering shift (tree layout) */
   originX: number
@@ -756,7 +773,7 @@ function ActionPopup({
   const container = scrollRef.current
   if (!container) return null
   const rect = container.getBoundingClientRect()
-  const rowTopY = rect.top + index * ROW_H + topOffset - scrollTop
+  const rowTopY = rect.top + index * ROW_H + topOffset + gapAbove - scrollTop
   // rest the bar on the row ABOVE the selected one (6px gap); flip below
   // when that would leave the container (selected row at the viewport top)
   let top = rowTopY - popupH - 6

@@ -23,17 +23,24 @@ function GraphEdgesInner({
   start,
   end,
   offset = 0,
+  gapAfter = -1,
   dim = false,
   originX = 0,
 }: {
   start: number
   end: number
   offset?: number
+  /** selection gap: rows at i ≥ gapAfter render one ROW_H lower (-1 = none) */
+  gapAfter?: number
   dim?: boolean
   originX?: number
 }) {
   const edges = useGraphStore((s) => s.edges)
   const laneCount = useGraphStore((s) => s.laneLayout.laneCount)
+  // layer placement under the gap: uniformly shifted when the gap is above
+  // the window, one row taller when the gap falls inside it
+  const shift = gapAfter >= 0 && gapAfter <= start ? ROW_H : 0
+  const extra = gapAfter > start && gapAfter <= end ? ROW_H : 0
 
   const paths = useMemo(() => {
     if (end <= start) return null
@@ -46,14 +53,14 @@ function GraphEdgesInner({
       if (max < start - 1 || min > end) continue
 
       const x1 = laneX(e.fromLane)
-      const y1 = e.fromIdx * ROW_H + ROW_H / 2 - start * ROW_H
+      const y1 = e.fromIdx * ROW_H + ROW_H / 2 - start * ROW_H + (gapAfter >= 0 && e.fromIdx >= gapAfter ? ROW_H : 0)
       if (e.dangling) {
         out.push(`M ${x1} ${y1} L ${x1} ${y1 + ROW_H / 2}`)
         colors.push(laneColor(e.fromLane))
         continue
       }
       const x2 = laneX(e.toLane)
-      const y2 = e.toIdx * ROW_H + ROW_H / 2 - start * ROW_H
+      const y2 = e.toIdx * ROW_H + ROW_H / 2 - start * ROW_H + (gapAfter >= 0 && e.toIdx >= gapAfter ? ROW_H : 0)
       if (x1 === x2) {
         out.push(`M ${x1} ${y1} L ${x1} ${y2}`)
       } else {
@@ -65,15 +72,15 @@ function GraphEdgesInner({
       colors.push(laneColor(e.fromLane))
     }
     return { out, colors }
-  }, [edges, start, end])
+  }, [edges, start, end, gapAfter])
 
   if (!paths || paths.out.length === 0) {
     return (
       <svg
         className="pointer-events-none absolute"
-        style={{ top: start * ROW_H + offset, left: originX, opacity: dim ? 0.25 : 1, transition: 'left 150ms, opacity 150ms' }}
+        style={{ top: start * ROW_H + offset + shift, left: originX, opacity: dim ? 0.25 : 1, transition: 'left 150ms, opacity 150ms' }}
         width={120}
-        height={(end - start) * ROW_H}
+        height={(end - start) * ROW_H + extra}
       >
         <defs />
       </svg>
@@ -85,7 +92,7 @@ function GraphEdgesInner({
   return (
     <svg
       className="pointer-events-none absolute"
-      style={{ top: start * ROW_H + offset, left: originX, width, height: (end - start) * ROW_H, opacity: dim ? 0.25 : 1, transition: 'left 150ms, opacity 150ms' }}
+      style={{ top: start * ROW_H + offset + shift, left: originX, width, height: (end - start) * ROW_H + extra, opacity: dim ? 0.25 : 1, transition: 'left 150ms, opacity 150ms' }}
       data-testid="graph-edges"
     >
       {paths.out.map((d, i) => (
