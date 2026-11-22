@@ -447,26 +447,77 @@ export default function RepoPage() {
       .finally(() => useUiStore.getState().endOp())
   }
 
-  // remote chip double-click / popup Checkout: switch to the local branch
-  // when it already exists (a plain checkout — no dialog needed), confirm
-  // only the create-tracking case, no-op when that branch is already current
+  // remote chip double-click / popup Checkout = "take me to what I'm pointing
+  // at": the local branch (created tracking when missing) moves onto the
+  // remote chip's commit — fast-forward when behind, plain switch when the
+  // local is current/ahead, and a DANGER confirm for divergence (the only
+  // shape where moving to the remote loses local commits)
   const checkoutRemoteRef = (remoteRef: string) => {
     const local = remoteRef.slice(remoteRef.indexOf('/') + 1)
+    const localBranch = refs?.branches.find((b) => b.name === local)
+    if (!localBranch) {
+      useUiStore.getState().setDialog({
+        kind: 'confirm',
+        title: 'Checkout remote branch',
+        message: `Create local branch "${local}" tracking ${remoteRef} and check it out?`,
+        confirmLabel: 'Checkout',
+        onConfirm: () => checkoutBranch(local, remoteRef),
+      })
+      return
+    }
+    const remoteTip = refs?.remoteBranches.find((r) => r.name === remoteRef)?.sha
+    const forwardOk = !!remoteTip && isAncestorOf(localBranch.sha, remoteTip) // behind (or equal) → ff possible
+    const hasAll = !!remoteTip && isAncestorOf(remoteTip, localBranch.sha) // equal (or ahead) → nothing to move
     if (local === currentBranch) {
-      toast({ kind: 'info', title: `Already on ${local}`, detail: `${remoteRef} tracks the checked-out branch` })
+      if (!remoteTip || remoteTip === localBranch.sha) {
+        toast({ kind: 'info', title: `Already on ${local}`, detail: `up to date with ${remoteRef}` })
+        return
+      }
+      if (hasAll) {
+        toast({ kind: 'info', title: `${local} is ahead of ${remoteRef}`, detail: 'Nothing to fast-forward — push instead' })
+        return
+      }
+    } else if (hasAll) {
+      checkoutBranch(local) // local already has everything — just switch to it
       return
     }
-    if (refs?.branches.some((b) => b.name === local)) {
-      checkoutBranch(local)
+    const run = (reset: boolean) => {
+      useUiStore.getState().beginOp('Checkout')
+      void api
+        .branchFastForward(path, local, remoteRef, local !== currentBranch, reset)
+        .then(() => {
+          toast({
+            kind: 'success',
+            title:
+              local === currentBranch
+                ? `${local} ${reset ? 'reset' : 'fast-forwarded'} to ${remoteRef}`
+                : `Checked out ${local} at ${remoteRef}`,
+          })
+          const sha = reset ? remoteTip : remoteTip ?? localBranch.sha
+          if (sha) useUiStore.getState().requestScrollTo(sha)
+          refreshAll()
+        })
+        .catch((e: unknown) => {
+          const { title, detail } = friendlyError(e)
+          toast({ kind: 'error', title, detail })
+          refreshAll()
+        })
+        .finally(() => useUiStore.getState().endOp())
+    }
+    if (!forwardOk) {
+      useUiStore.getState().setDialog({
+        kind: 'confirm',
+        danger: true,
+        title: `"${local}" has diverged from ${remoteRef}`,
+        message:
+          `"${local}" has commits ${remoteRef} doesn't. A fast-forward is impossible; resetting it to ${remoteRef} makes those local commits unreachable (recoverable only via reflog).\n\n` +
+          'Rebase onto it, or drag-move the branch, to keep them instead.',
+        confirmLabel: 'Reset to remote',
+        onConfirm: () => run(true),
+      })
       return
     }
-    useUiStore.getState().setDialog({
-      kind: 'confirm',
-      title: 'Checkout remote branch',
-      message: `Create local branch "${local}" tracking ${remoteRef} and check it out?`,
-      confirmLabel: 'Checkout',
-      onConfirm: () => checkoutBranch(local, remoteRef),
-    })
+    run(false)
   }
 
   const repoName = path.split('/').filter(Boolean).pop() ?? path
@@ -573,6 +624,7 @@ export default function RepoPage() {
                   selectedRef={selectedRef}
                   remoteBranchNames={refs?.remoteBranches.map((r) => r.name) ?? []}
                   localBranchNames={refs?.branches.map((b) => b.name) ?? []}
+                  onCheckoutRemote={checkoutRemoteRef}
                   currentBranch={currentBranch}
                   headSha={refs?.head?.sha}
                   onRefresh={refreshAll}

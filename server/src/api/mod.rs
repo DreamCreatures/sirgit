@@ -52,6 +52,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/revert/abort", post(ops::revert_abort))
         .route("/api/cherry-pick", post(ops::cherry_pick))
         .route("/api/branch/move", post(ops::move_branch))
+        .route("/api/branch/fast-forward", post(ops::branch_fast_forward))
         .route("/api/tag/move", post(ops::move_tag))
         .route("/api/branch/merge", post(ops::merge_branch))
         .route("/api/tag/create", post(ops::tag_create))

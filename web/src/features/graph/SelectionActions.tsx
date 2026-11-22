@@ -20,6 +20,8 @@ export interface SelectionActionsProps {
   remoteBranchNames: string[]
   /** local branch names — a remote checkout whose local exists is a plain checkout */
   localBranchNames: string[]
+  /** remote checkout with fast-forward semantics — RepoPage's shared handler */
+  onCheckoutRemote: (remoteRef: string) => void
   currentBranch?: string
   headSha?: string
   onRefresh: () => void
@@ -32,6 +34,7 @@ export function SelectionActions({
   selectedRef,
   remoteBranchNames,
   localBranchNames,
+  onCheckoutRemote,
   currentBranch,
   headSha,
   onRefresh,
@@ -74,20 +77,6 @@ export function SelectionActions({
       })
   }
 
-  /** like run(), but returns the settled promise so an AppDialog onConfirm
-   *  keeps the modal open with a spinner until the op finishes */
-  const runAsync = (fn: () => Promise<unknown>): Promise<unknown> => {
-    useUiStore.getState().beginOp('Working')
-    return fn()
-      .then(() => onRefresh())
-      .catch((e: unknown) => {
-        const { title, detail } = friendlyError(e)
-        toast({ kind: 'error', title, detail })
-        onRefresh()
-      })
-      .finally(() => useUiStore.getState().endOp())
-  }
-
   /** dialog variant of run(): REJECTS on failure so AppDialog keeps the
    *  modal open and shows the error inline — the user fixes the input
    *  (name taken, protected ref) instead of retyping it after a toast */
@@ -98,11 +87,6 @@ export function SelectionActions({
       .finally(() => useUiStore.getState().endOp())
   }
 
-  /** remote branch → local: plain checkout when that local branch already
-   *  exists (checkout -b would fail with "already exists"), tracking
-   *  create-and-checkout otherwise */
-  const checkoutRemote = (local: string, remote: string) =>
-    localBranchNames.includes(local) ? api.checkout(path, local) : api.checkout(path, local, remote)
 
   /** Push with busy state, error toasts, and a force-push offer on non-fast-forward. */
   const runPush = (remote: string, refspec: string) => {
@@ -177,22 +161,9 @@ export function SelectionActions({
           {rowRefs.some((r) => r.type === 'remote-branch') && (
             <button
               className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
-              onClick={() => {
-                const rb = rowRefs.find((r) => r.type === 'remote-branch')!
-                const remote = rb.name.split('/')[0]
-                const local = rb.name.slice(remote.length + 1)
-                if (localBranchNames.includes(local)) {
-                  run(() => checkoutRemote(local, remote))
-                  return
-                }
-                useUiStore.getState().setDialog({
-                  kind: 'confirm',
-                  title: 'Checkout remote branch',
-                  message: `Create local branch "${local}" tracking ${rb.name} and check it out?`,
-                  confirmLabel: 'Checkout',
-                  onConfirm: () => run(() => checkoutRemote(local, remote)),
-                })
-              }}
+              onClick={() =>
+                onCheckoutRemote(rowRefs.find((r) => r.type === 'remote-branch')!.name)
+              }
             >
               <CornerUpLeft className="h-3.5 w-3.5" /> Checkout remote
             </button>
@@ -351,38 +322,20 @@ export function SelectionActions({
       {/* remote branch actions (origin/x chip selected) */}
       {selRemote && !selBranch && !selTag && (
         <>
-          {/* checkout only when it would do something: hidden when the local
-           *  branch it resolves to is the one already checked out */}
-          {selRemote.name.slice(selRemote.name.indexOf('/') + 1) !== currentBranch && (
-            <button
-              className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
-              title={
-                localBranchNames.includes(selRemote.name.slice(selRemote.name.indexOf('/') + 1))
-                  ? `Check out local branch "${selRemote.name.slice(selRemote.name.indexOf('/') + 1)}"`
-                  : `Create local branch "${selRemote.name.split('/').slice(1).join('/')}" tracking ${selRemote.name} and check it out`
-              }
-              onClick={() => {
-                const remote = selRemote.name.split('/')[0]
-                const local = selRemote.name.slice(remote.length + 1)
-                // local branch exists → plain switch, immediate (same as a local
-                // chip's double-click); only the create-tracking case confirms
-                if (localBranchNames.includes(local)) {
-                  run(() => checkoutRemote(local, remote))
-                  return
-                }
-                useUiStore.getState().setDialog({
-                  kind: 'confirm',
-                  title: 'Checkout remote branch',
-                  message: `Create local branch "${local}" tracking ${selRemote.name} and check it out?`,
-                  confirmLabel: 'Checkout',
-                  // returns the promise → the dialog spins until the checkout lands
-                  onConfirm: () => runAsync(() => checkoutRemote(local, remote)),
-                })
-              }}
-            >
-              <CornerUpLeft className="h-3.5 w-3.5" /> Checkout
-            </button>
-          )}
+          {/* checkout of a remote chip = "take me to what I'm pointing at":
+           * fast-forward the local branch when behind (created tracking when
+           * missing); the shared RepoPage handler decides and warns */}
+          <button
+            className={`${btn} bg-zinc-800 text-zinc-200 hover:bg-zinc-700`}
+            title={
+              localBranchNames.includes(selRemote.name.slice(selRemote.name.indexOf('/') + 1))
+                ? `Fast-forward "${selRemote.name.slice(selRemote.name.indexOf('/') + 1)}" to ${selRemote.name} and check it out`
+                : `Create local branch "${selRemote.name.split('/').slice(1).join('/')}" tracking ${selRemote.name} and check it out`
+            }
+            onClick={() => onCheckoutRemote(selRemote.name)}
+          >
+            <CornerUpLeft className="h-3.5 w-3.5" /> Checkout
+          </button>
           {currentBranch && (
             <button
               className={`${btn} bg-violet-500/15 text-violet-300 hover:bg-violet-500/25`}

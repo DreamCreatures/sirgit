@@ -194,6 +194,20 @@ pub struct MoveTagParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FastForwardParams {
+    pub path: String,
+    pub branch: String,
+    pub remote_ref: String,
+    #[serde(default)]
+    pub checkout: bool,
+    /// destructive: reset the branch onto the remote instead of fast-forwarding
+    /// (client gates this behind a danger confirm — diverged histories only)
+    #[serde(default)]
+    pub reset: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MergeBranchParams {
     pub path: String,
     pub from: String,
@@ -357,6 +371,18 @@ pub async fn move_tag(State(app): State<Arc<AppState>>, Json(p): Json<MoveTagPar
     let (_st, _g) = locked(&app, &p.path).await?;
     ops::move_tag(&p.path, &p.tag, &p.target).await.map_err(ApiError::Git)?;
     _st.bump(&["refs"]);
+    Ok(ok_json())
+}
+
+pub async fn branch_fast_forward(State(app): State<Arc<AppState>>, Json(p): Json<FastForwardParams>) -> ApiResult<Json<serde_json::Value>> {
+    let (_st, _g) = locked(&app, &p.path).await?;
+    let result = if p.reset {
+        ops::reset_branch_to(&p.path, &p.branch, &p.remote_ref, p.checkout).await
+    } else {
+        ops::ff_branch(&p.path, &p.branch, &p.remote_ref, p.checkout).await
+    };
+    result.map_err(ApiError::Git)?;
+    _st.bump(&["refs", "index", "worktree"]);
     Ok(ok_json())
 }
 

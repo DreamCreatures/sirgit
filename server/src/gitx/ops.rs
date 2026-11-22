@@ -549,6 +549,65 @@ pub async fn move_tag(repo: &str, tag: &str, target: &str) -> Result<(), super::
     }
 }
 
+/// Fast-forward local `branch` onto the remote-tracking ref (NO network —
+/// the graph's remote chip already pins the target; Fetch refreshes it).
+/// - current branch: `merge --ff-only <remote_ref>` — the worktree follows,
+///   divergence and conflicting local edits are refused by git
+/// - other branch: `fetch . refs/remotes/<r>:refs/heads/<b>` — the refspec
+///   refuses non-ff by construction and git refuses the checked-out branch,
+///   so both dangerous shapes are impossible
+/// `checkout` then switches to the branch (non-current branches only).
+pub async fn ff_branch(repo: &str, branch: &str, remote_ref: &str, checkout: bool) -> Result<(), super::errors::GitError> {
+    let w = repo_or_err(repo)?;
+    let head = run_git(&w, &["symbolic-ref".to_string(), "-q".to_string(), "--short".to_string(), "HEAD".to_string()], GitKind::ReadOnly).await?;
+    let current = head.stdout.trim().to_string();
+    if branch == current {
+        run_git(&w, &["merge".to_string(), "--ff-only".to_string(), remote_ref.to_string()], GitKind::Mutation).await?;
+    } else {
+        run_git(
+            &w,
+            &[
+                "fetch".to_string(),
+                ".".to_string(),
+                format!("refs/remotes/{}:refs/heads/{}", remote_ref, branch),
+            ],
+            GitKind::Mutation,
+        )
+        .await?;
+        if checkout {
+            run_git(&w, &["checkout".to_string(), branch.to_string()], GitKind::Mutation).await?;
+        }
+    }
+    Ok(())
+}
+
+/// DESTRUCTIVE counterpart of ff_branch: force the local branch onto the
+/// remote-tracking ref, dropping commits the remote doesn't have (reflog
+/// only). The client only reaches this through an explicit danger confirm.
+pub async fn reset_branch_to(repo: &str, branch: &str, remote_ref: &str, checkout: bool) -> Result<(), super::errors::GitError> {
+    let w = repo_or_err(repo)?;
+    let head = run_git(&w, &["symbolic-ref".to_string(), "-q".to_string(), "--short".to_string(), "HEAD".to_string()], GitKind::ReadOnly).await?;
+    let current = head.stdout.trim().to_string();
+    if branch == current {
+        run_git(&w, &["reset".to_string(), "--hard".to_string(), remote_ref.to_string()], GitKind::Mutation).await?;
+    } else {
+        run_git(
+            &w,
+            &[
+                "update-ref".to_string(),
+                format!("refs/heads/{}", branch),
+                format!("refs/remotes/{}", remote_ref),
+            ],
+            GitKind::Mutation,
+        )
+        .await?;
+        if checkout {
+            run_git(&w, &["checkout".to_string(), branch.to_string()], GitKind::Mutation).await?;
+        }
+    }
+    Ok(())
+}
+
 /// Pull = fetch + fast-forward-only merge of the current branch's upstream.
 /// Pull = fetch + fast-forward the target branch to its upstream.
 /// - Current branch: fetch remote, then `merge --ff-only remote/branch`.
@@ -653,6 +712,80 @@ pub fn b64_url(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fast-forwarding onto a remote-tracking ref: current branch merges
+    /// --ff-only (worktree follows), other branches move via the local
+    /// refspec fetch + optional checkout, and divergence is refused.
+    #[tokio::test]
+    async fn ff_branch_moves_current_other_and_refuses_divergence() {
+        let tmp = std::env::temp_dir().join(format!("sirgit-fftest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
+        let c = |msg: &str, file: &str, body: &str| {
+            std::fs::write(tmp.join(file), body).unwrap();
+            assert!(git(&["add", "."]).status.success());
+            assert!(git(&["commit", "-q", "-m", msg]).status.success());
+            String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout).trim().to_string()
+        };
+        let c1 = c("c1", "a.txt", "one\n");
+        let c2 = c("c2", "b.txt", "two\n");
+        // pretend the remote moved to c2 while local main and other both sit at c1
+        assert!(git(&["update-ref", "refs/remotes/origin/main", &c2]).status.success());
+        assert!(git(&["branch", "other", &c1]).status.success());
+        assert!(git(&["update-ref", "refs/remotes/origin/other", &c2]).status.success());
+
+        // current branch: fast-forward + worktree follows
+        ff_branch(tmp.to_str().unwrap(), "main", "origin/main", false).await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&git(&["rev-parse", "main"]).stdout).trim(), c2);
+        assert!(tmp.join("b.txt").exists(), "worktree must follow the ff");
+
+        // divergence while main is still checked out: main moves to c3 while
+        // the "remote" gains c2b — a sibling commit off c1 (merge --ff-only
+        // of an ANCESTOR is a no-op "up to date", not divergence). The ff
+        // must refuse (would lose c3) and the explicit reset lands it.
+        let c3 = c("c3", "c.txt", "three\n");
+        let tree = String::from_utf8_lossy(&git(&["rev-parse", &format!("{}^{{tree}}", c2)]).stdout).trim().to_string();
+        let c2b = String::from_utf8_lossy(&git(&["commit-tree", &tree, "-p", &c1, "-m", "remote side"]).stdout)
+            .trim()
+            .to_string();
+        assert!(git(&["update-ref", "refs/remotes/origin/main", &c2b]).status.success());
+        assert!(
+            ff_branch(tmp.to_str().unwrap(), "main", "origin/main", false).await.is_err(),
+            "diverged fast-forward must refuse"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "main"]).stdout).trim(),
+            c3,
+            "refused ff must not move main"
+        );
+        reset_branch_to(tmp.to_str().unwrap(), "main", "origin/main", false).await.unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&git(&["rev-parse", "main"]).stdout).trim(),
+            c2b,
+            "reset must land main on the remote's commit"
+        );
+        assert!(!tmp.join("c.txt").exists(), "reset --hard must drop the diverged commit's files");
+
+        // non-current branch: refspec ff + checkout
+        ff_branch(tmp.to_str().unwrap(), "other", "origin/other", true).await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&git(&["rev-parse", "other"]).stdout).trim(), c2);
+        assert_eq!(String::from_utf8_lossy(&git(&["symbolic-ref", "--short", "HEAD"]).stdout).trim(), "other");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn b64_url_matches_reference() {
