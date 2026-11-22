@@ -91,6 +91,26 @@ describe('assignLanes (branch chains)', () => {
     expect(lanes.get('b2')).toBe(2)
   })
 
+  it('stacks chains beyond the fan to the right instead of widening the band', () => {
+    // 12 side chains: first 10 alternate ±2..±6, the rest stack right of the
+    // fan — merge-heavy repos must not push the trunk off-screen
+    const ordered: CommitRow[] = [row('t1')]
+    const tips: { sha: string; current: boolean }[] = [{ sha: 't1', current: true }]
+    for (let i = 1; i <= 12; i++) {
+      ordered.unshift(row(`c${i}`, 't1'))
+      tips.push({ sha: `c${i}`, current: false })
+    }
+    const { lanes } = assignLanes(ordered, tips, 't1', 'tree')
+    expect(lanes.get('t1')).toBe(6) // trunk: 5 left-side fan chains + spacing
+    // display order is c12 (newest) → c1: the fan fills c12..c3, then the
+    // overflow stacks right
+    expect(lanes.get('c12')).toBe(8) // fan chain #1 → right +2
+    expect(lanes.get('c11')).toBe(4) // fan chain #2 → left −2
+    expect(lanes.get('c3')).toBe(0) // fan chain #10 → left −6 (outermost)
+    expect(lanes.get('c2')).toBe(13) // beyond fan: fanRight(6)+1 + left(6)
+    expect(lanes.get('c1')).toBe(14) // fanRight(6)+2 + left(6)
+  })
+
   it('falls back to topology-only lanes without tips', () => {
     // merge commit m(x, y): extra parent opens its own lane, r consolidates
     const ordered = [row('m', 'x', 'y'), row('x', 'r'), row('y', 'r'), row('r')]

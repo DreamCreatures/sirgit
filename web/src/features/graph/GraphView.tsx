@@ -134,31 +134,20 @@ export default function GraphView({
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
   const end = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
 
-  // tree layout: center the lane band when the viewport has spare width (e.g.
-  // collapsed refs panel) — the trunk already sits mid-band thanks to the
-  // alternating lane assignment, so the checked-out branch lands near the
-  // viewport middle instead of hugging the left edge. The band spans the
-  // OUTERMOST NODE EDGES (± the biggest node radius, HEAD's 15), not lane
-  // centers, so centering is exact. 'left' mode never centers (classic
-  // left-anchored graph); narrow viewport → 0 → left-anchored too.
+  // tree layout centers the TRUNK itself (the checked-out branch's column),
+  // not the whole lane band: merge-heavy repos accumulate hundreds of
+  // right-stacked chains beyond the alternating fan, and centering that band
+  // would push the trunk off-screen. Trunk at viewport middle = HEAD where
+  // the eye rests, fan around it, overflow clipped right. 'left' mode never
+  // centers.
   const laneMode = useGraphStore((s) => s.laneMode)
-  const minEdge = LANE_GUTTER + LANE_W / 2 - 15
-  const maxEdge = laneX(laneLayout.laneCount - 1) + 15
-  const bandW = maxEdge - minEdge
-  const originX =
-    laneMode === 'tree' ? Math.max(0, Math.floor((viewportW - bandW) / 2) - minEdge) : 0
-
-  // --- HEAD tether (ungit's dashed top node + guide edge): an always-on
-  // marker of where HEAD is, even when newer branches bury it deep in the
-  // view. A dashed circle in HEAD's lane with a dashed guide line down to
-  // the HEAD node. The circle rests in the reserved top slot while HEAD
-  // leads the view; once you scroll past HEAD it PINS to the top edge of
-  // the viewport with a "↑N" badge (click = jump back) — deep-history
-  // orientation ungit itself doesn't give. Strong ring when a prospective
-  // commit is pending (staged / in-flight), subtle when clean. ---
   const headIdx = headSha ? ordered.findIndex((r) => r.sha === headSha) : -1
   const headLane = headIdx >= 0 && headSha ? (laneLayout.lanes.get(headSha) ?? -1) : -1
   const trunkLane = headIdx >= 0 && headLane >= 0 ? headLane : undefined
+  const originX =
+    laneMode === 'tree' && trunkLane != null
+      ? Math.max(0, Math.floor(viewportW / 2) - laneX(trunkLane))
+      : 0
   const showTether = headIdx >= 0 && headLane >= 0 && !ghostSha
   const headCenterY = headIdx * ROW_H + ghostOffset + ROW_H / 2
   const tetherCx = originX + laneX(headLane)

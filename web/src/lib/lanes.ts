@@ -189,19 +189,25 @@ function assignLanesChains(
     return { lanes, laneCount: Math.max(1, lane) }
   }
 
-  // tree layout: trunk = offset 0; side chains ALTERNATE sides around it,
-  // with the FIRST ring double-spaced (1st → +2, 2nd → −2, 3rd → +3, 4th →
-  // −3, …) — one lane of breathing room between the trunk and its nearest
-  // siblings, whose chips face the trunk (mirrored rows). Offsets then
-  // normalize to plain 0..laneCount−1 slots with the trunk in the middle —
-  // consumers never see a negative lane. Appending older pages only ever
-  // adds chains at the fan's outer edge, so existing columns keep their
-  // slots (the whole band shifts at most one lane right).
+  // tree layout: trunk = offset 0; the first FAN_CAP side chains ALTERNATE
+  // sides around it, double-spaced (1st → +2, 2nd → −2, 3rd → +3, …) — one
+  // lane of breathing room between the trunk and its nearest siblings,
+  // whose chips face the trunk (mirrored rows). Chains BEYOND the fan stack
+  // monotonically to the right: merge-heavy histories (ungit: ~470 merged-PR
+  // subtrees) must not widen the alternating band, or the trunk lands mid-
+  // band thousands of pixels off-screen and the page reads as empty.
+  // Offsets normalize to plain 0..laneCount−1 slots — consumers never see a
+  // negative lane; the view centers the TRUNK, not the band.
+  const FAN_CAP = 10
+  const fanRight = Math.ceil(FAN_CAP / 2) + 1
   let sideIndex = 0
   const offsets = chains.map((chain) => {
     if (chain.trunk) return 0
     sideIndex++
-    return sideIndex % 2 === 1 ? (sideIndex + 1) / 2 + 1 : -(sideIndex / 2 + 1)
+    if (sideIndex <= FAN_CAP) {
+      return sideIndex % 2 === 1 ? (sideIndex + 1) / 2 + 1 : -(sideIndex / 2 + 1)
+    }
+    return fanRight + (sideIndex - FAN_CAP)
   })
   let min = 0
   let max = 0
