@@ -129,18 +129,23 @@ export default function RefsPanel({ path }: { path: string }) {
       return a.name.localeCompare(b.name)
     })
 
-  // sidebar-only branch filter; the checked-out branch is always listed
-  const RECENT_WINDOW_S = 30 * 24 * 3600
-  const visibleBranches = pinAndSort(
-    branches.filter((b) => {
-      // 'local' keeps every local branch — it hides the sections below instead
-      if (branchFilter === 'all' || branchFilter === 'local') return true
-      if (b.name === head?.branch) return true
-      const tipDate = rowsBySha.get(b.sha)?.commitDate ?? 0
-      return Date.now() / 1000 - tipDate <= RECENT_WINDOW_S
-    }),
-    (b) => b.name === head?.branch,
-  )
+  // sidebar-only branch filter. 'local' keeps every local branch (it hides
+  // the sections below instead); 'recent' = the branches the user CHECKED
+  // OUT most recently (HEAD reflog, still existing, capped 10) — where you
+  // switched to, not which branch got new commits. The checked-out branch
+  // is always listed and pinned on top.
+  const RECENT_MAX = 10
+  const visibleBranches =
+    branchFilter === 'recent'
+      ? (() => {
+          const recentIdx = new Map((data.recentBranches ?? []).map((n, i) => [n, i]))
+          const kept = branches
+            .filter((b) => b.name === head?.branch || recentIdx.has(b.name))
+            // -1 floats HEAD first even when no reflog names it (fresh clone)
+            .sort((a, b) => (recentIdx.get(a.name) ?? -1) - (recentIdx.get(b.name) ?? -1))
+          return kept.slice(0, RECENT_MAX)
+        })()
+      : pinAndSort(branches, (b) => b.name === head?.branch)
   const sortedRemoteBranches = pinAndSort(
     remoteBranches,
     (r) => !!head?.branch && r.name.endsWith(`/${head.branch}`),
@@ -167,7 +172,7 @@ export default function RefsPanel({ path }: { path: string }) {
             [
               ['all', 'All', 'All branches'],
               ['local', 'Local', 'Only local branches — remote branches, tags and remotes are hidden'],
-              ['recent', 'Recent', 'Only branches with commits in the last month'],
+              ['recent', 'Recent', 'The last 10 branches you checked out (still existing)'],
             ] as const
           ).map(([value, label, title]) => (
             <button

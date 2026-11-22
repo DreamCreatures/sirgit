@@ -35,6 +35,8 @@ export interface RefsSnapshot {
   upstream?: string
   ahead: number
   behind: number
+  /** local branch names in reverse CHECKOUT order (HEAD reflog), still existing */
+  recentBranches: string[]
 }
 
 export interface FileEntry {

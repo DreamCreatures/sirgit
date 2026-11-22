@@ -71,8 +71,8 @@ interface UiState {
   /**
    * Left-panel branch-list filter. Graph map is NEVER filtered — only this
    * panel shrinks. local = only the local Branches section shows (remote
-   * branches, tags and remotes are hidden); recent = tip committed within
-   * the last month (current branch always listed).
+   * branches, tags and remotes are hidden); recent = the last 10 branches
+   * CHECKED OUT (HEAD reflog, still existing; current branch always listed).
    */
   branchFilter: 'all' | 'local' | 'recent'
   setBranchFilter(v: 'all' | 'local' | 'recent'): void

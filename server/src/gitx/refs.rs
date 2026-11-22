@@ -54,6 +54,10 @@ pub struct RefsSnapshot {
     pub upstream: Option<String>,
     pub ahead: i64,
     pub behind: i64,
+    /// Local branch names in reverse CHECKOUT order (HEAD reflog), newest
+    /// first, existing branches only, capped — drives the sidebar's Recent
+    /// filter ("branches I switched to", not "branches with new commits")
+    pub recent_branches: Vec<String>,
 }
 
 // %(*objectname) is the PEELED sha — the commit an annotated tag points at.
@@ -155,8 +159,9 @@ pub async fn read_refs(path: &str) -> Result<RefsSnapshot, super::errors::GitErr
     }
 
     let tag_cache = super::remote_tags::read_cached(&gitdir);
+    let recent_branches = read_recent_checkouts(&worktree, &branches).await;
 
-    Ok(RefsSnapshot { branches, remote_branches, tags, remotes, head, remote_tags: tag_cache.tags, remote_tags_remote: tag_cache.remote, upstream, ahead, behind })
+    Ok(RefsSnapshot { branches, remote_branches, tags, remotes, head, remote_tags: tag_cache.tags, remote_tags_remote: tag_cache.remote, upstream, ahead, behind, recent_branches })
 }
 
 pub async fn read_remotes(worktree: &Path) -> Result<Vec<String>, super::errors::GitError> {
@@ -194,6 +199,56 @@ async fn rev_parse_head(worktree: &Path) -> Option<String> {
     let out = run_git(worktree, &["rev-parse".into(), "HEAD".into()], GitKind::ReadOnly).await.ok()?;
     let s = out.stdout.trim().to_string();
     if s.is_empty() { None } else { Some(s) }
+}
+
+/// How many recent checkouts the Recent filter shows (user rule: last 10).
+const RECENT_CHECKOUTS_CAP: usize = 10;
+
+/// Branches the user recently CHECKED OUT, newest first — parsed from the
+/// HEAD reflog ("checkout/switch: moving from X to Y"). Both sides of an
+/// entry count (the first checkout's source is the repo's initial branch,
+/// which is nobody's destination until you return to it); names must still
+/// exist as local branches, so deleted branches and detached-checkout
+/// shas/tags drop out naturally.
+async fn read_recent_checkouts(worktree: &Path, branches: &[RefInfo]) -> Vec<String> {
+    let out = match run_git(
+        worktree,
+        &[
+            "reflog".into(),
+            "show".into(),
+            "HEAD".into(),
+            "--format=%gs".into(),
+            "-n".into(),
+            "500".into(),
+        ],
+        GitKind::ReadOnly,
+    )
+    .await
+    {
+        Ok(o) => o.stdout,
+        // no reflog yet (fresh init/clone) — Recent shows just HEAD
+        Err(_) => return Vec::new(),
+    };
+    let existing: std::collections::HashSet<&str> = branches.iter().map(|b| b.name.as_str()).collect();
+    let mut recent: Vec<String> = Vec::new();
+    for line in out.lines() {
+        let line = line.trim();
+        let Some(rest) = line
+            .strip_prefix("checkout: moving from ")
+            .or_else(|| line.strip_prefix("switch: moving from "))
+        else {
+            continue;
+        };
+        let Some((from, to)) = rest.split_once(" to ") else { continue };
+        // destination first — it is the more recent checkout of the two
+        for name in [to.trim(), from.trim()] {
+            if !name.is_empty() && existing.contains(name) && !recent.iter().any(|r| r == name) {
+                recent.push(name.to_string());
+            }
+        }
+    }
+    recent.truncate(RECENT_CHECKOUTS_CAP);
+    recent
 }
 
 #[cfg(test)]
@@ -239,7 +294,10 @@ mod tests {
             }
         }
         fn rand_suffix() -> u128 {
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() % 1_000_000
+            // nanos alone collided between parallel tests once; add a per-process counter
+            static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u128;
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() % 1_000_000 + n * 1_000_003
         }
     }
 
@@ -277,5 +335,53 @@ mod tests {
         let snap = read_refs(td.path.to_str().unwrap()).await.unwrap();
         let v2 = snap.tags.iter().find(|t| t.name == "v2.0").expect("annotated tag listed");
         assert_eq!(v2.sha, head, "annotated tag must peel to the commit sha");
+    }
+
+    #[tokio::test]
+    async fn recent_checkouts_follow_head_reflog() {
+        let (td,) = fixture();
+        let p = &td.path;
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(p)
+                .env("GIT_AUTHOR_NAME", "T").env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T").env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        // main → feature → back to main
+        assert!(git(&["checkout", "-q", "feature"]).status.success());
+        assert!(git(&["checkout", "-q", "main"]).status.success());
+        let snap = read_refs(td.path.to_str().unwrap()).await.unwrap();
+        assert_eq!(snap.recent_branches, vec!["main".to_string(), "feature".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn deleted_and_detached_drop_out_of_recent() {
+        let (td,) = fixture();
+        let p = &td.path;
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(p)
+                .env("GIT_AUTHOR_NAME", "T").env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T").env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        // main → tmp (branch) → detached sha → back to main, then tmp deleted
+        assert!(git(&["branch", "tmp"]).status.success());
+        assert!(git(&["checkout", "-q", "tmp"]).status.success());
+        let sha = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout).trim().to_string();
+        assert!(git(&["checkout", "-q", "--detach"]).status.success());
+        assert!(git(&["checkout", "-q", "main"]).status.success());
+        assert!(git(&["branch", "-D", "tmp"]).status.success());
+        let snap = read_refs(td.path.to_str().unwrap()).await.unwrap();
+        // tmp is gone and the detached sha never was a branch — only main
+        // remains, with feature trailing from the fixture's untouched state
+        assert!(snap.recent_branches.contains(&"main".to_string()));
+        assert!(!snap.recent_branches.iter().any(|b| b == "tmp"));
+        assert!(!snap.recent_branches.iter().any(|b| b == &sha));
     }
 }
