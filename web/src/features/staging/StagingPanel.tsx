@@ -289,12 +289,19 @@ export default function StagingPanel({
         </div>
 
         {stagingOpen && (
-          <div className="px-4 pb-3">
-          {/* collapsed: [commit box 1/3 | changes 2/3] side by side at the
-              compact bar height. expanded ([v]): full-width stacked rows —
-              the commit message, then the changes with all the remaining
-              room (up to 75% of the viewport) for reviewing diffs.
-              Nothing to commit (clean tree) → the box is hidden entirely. */}
+          /* default: [commit box 1/3 | changes 2/3] side by side at the
+           * compact bar height (inline — this height IS the map's anchor).
+           * expanded ([v]): the section grows OVER the graph as a floating
+           * overlay instead of pushing the map down — the commit map's top
+           * edge never moves. Nothing to commit (clean tree) → the box is
+           * hidden entirely. */
+          <div
+            className={
+              stagingExpanded
+                ? 'absolute inset-x-0 top-full z-20 border-b border-zinc-700 bg-zinc-900/95 px-4 py-3 shadow-2xl'
+                : 'px-4 pb-3'
+            }
+          >
           <div className={`flex gap-3 ${stagingExpanded ? 'flex-col max-h-[75vh]' : 'items-stretch max-h-56'}`}>
             {!hideCommit && (
             <div className={stagingExpanded ? 'shrink-0' : 'scroll-thin w-1/3 min-w-[240px] shrink-0 overflow-y-auto'}>

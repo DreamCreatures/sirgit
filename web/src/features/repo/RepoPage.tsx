@@ -427,11 +427,16 @@ export default function RepoPage() {
   // open state (measured directly, so margins/borders count). The canonical
   // anchor is the tallest open section seen — commit box visible — so BOTH
   // collapsing the section AND the box hiding on a clean tree compensate;
-  // the node never rides up.
+  // the node never rides up. The measured inset is PERSISTED (with a sane
+  // default), so a page loaded with the section already collapsed anchors
+  // correctly without ever seeing the open state in this session.
   const stagingOpen = useUiStore((s) => s.stagingOpen)
   const stagingSectionRef = useRef<HTMLDivElement>(null)
   const graphWrapRef = useRef<HTMLDivElement>(null)
-  const [graphTopInset, setGraphTopInset] = useState(0)
+  const [graphTopInset, setGraphTopInset] = useState(() => {
+    const v = parseInt(localStorage.getItem('sirgit.graphTopInset') ?? '', 10)
+    return Number.isFinite(v) && v > 0 ? v : 184 // 224 (max-h-56 bar) − ~40 collapsed header
+  })
   const openGraphTop = useRef<number | null>(null)
   useEffect(() => {
     const section = stagingSectionRef.current
@@ -442,14 +447,16 @@ export default function RepoPage() {
       if (stagingOpen) {
         openGraphTop.current = Math.max(openGraphTop.current ?? top, top)
       }
-      setGraphTopInset(Math.max(0, Math.round((openGraphTop.current ?? top) - top)))
+      const inset = Math.max(0, Math.round((openGraphTop.current ?? top + graphTopInset) - top))
+      setGraphTopInset(inset)
+      if (inset > 0) localStorage.setItem('sirgit.graphTopInset', String(inset))
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(section)
     ro.observe(wrap)
     return () => ro.disconnect()
-  }, [stagingOpen])
+  }, [stagingOpen, graphTopInset])
 
   const refreshAll = () => {
     void qc.invalidateQueries({ queryKey: ['refs', path] })
