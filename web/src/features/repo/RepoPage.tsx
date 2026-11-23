@@ -431,6 +431,7 @@ export default function RepoPage() {
   // default), so a page loaded with the section already collapsed anchors
   // correctly without ever seeing the open state in this session.
   const stagingOpen = useUiStore((s) => s.stagingOpen)
+  const stagingExpanded = useUiStore((s) => s.stagingExpanded)
   const stagingSectionRef = useRef<HTMLDivElement>(null)
   const graphWrapRef = useRef<HTMLDivElement>(null)
   const [graphTopInset, setGraphTopInset] = useState(() => {
@@ -444,7 +445,11 @@ export default function RepoPage() {
     if (!section || !wrap) return
     const measure = () => {
       const top = wrap.getBoundingClientRect().top
-      if (stagingOpen) {
+      // anchor = the graph top under the DEFAULT open bar (max-h-56). The
+      // grown-overlay mode leaves only the header inline — recording THAT
+      // would poison the anchor (every later state would pad against a
+      // section that was never really there).
+      if (stagingOpen && !stagingExpanded) {
         openGraphTop.current = Math.max(openGraphTop.current ?? top, top)
       }
       const inset = Math.max(0, Math.round((openGraphTop.current ?? top + graphTopInset) - top))
@@ -456,7 +461,7 @@ export default function RepoPage() {
     ro.observe(section)
     ro.observe(wrap)
     return () => ro.disconnect()
-  }, [stagingOpen, graphTopInset])
+  }, [stagingOpen, stagingExpanded, graphTopInset])
 
   const refreshAll = () => {
     void qc.invalidateQueries({ queryKey: ['refs', path] })
