@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, GitBranch, RefreshCw, CloudDownload, Download, Loader2, Eye, EyeOff, ListTree, AlignStartVertical } from 'lucide-react'
@@ -405,7 +405,8 @@ export default function RepoPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  // details drawer: outside click (not drawer, not rows) closes it and the selection  useEffect(() => {
+  // details drawer: outside click (not drawer, not rows) closes it and the selection
+  useEffect(() => {
     if (!detailsSha) return
     const handler = (e: MouseEvent) => {
       const t = e.target as HTMLElement
@@ -450,6 +451,11 @@ export default function RepoPage() {
   }, [stagingOpen])
 
   const refreshAll = () => {
+    void qc.invalidateQueries({ queryKey: ['refs', path] })
+    void qc.invalidateQueries({ queryKey: ['status', path] })
+    void qc.invalidateQueries({ queryKey: ['stash', path] })
+    void applyDelta()
+  }
 
   const netOp = async (fn: () => Promise<{ opId: string }>, done: string) => {
     const label = done.replace(' complete', '')
