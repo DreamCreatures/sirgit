@@ -284,11 +284,11 @@ export default function GraphView({
             data-testid="ghost-commit"
           >
             <svg width="100%" height={ghostSlot + ROW_H}>
-              {ghostIdx > 0 && <circle cx={laneX(ghostLane)} cy={ROW_H / 2} r={15} fill="#18181b" />}
+              {ghostIdx > 0 && <circle cx={laneX(ghostLane)} cy={ROW_H / 2} r={18} fill="#18181b" />}
               <circle
                 cx={laneX(ghostLane)}
                 cy={ROW_H / 2}
-                r={10}
+                r={13}
                 fill="none"
                 stroke={laneColor(ghostLane)}
                 strokeWidth={2}
@@ -377,15 +377,15 @@ export default function GraphView({
                   opacity={0.55}
                 />
               )}
-              {nextCommit && <circle cx={tetherCx} cy={24} r={12} fill="#18181b" />}
+              {nextCommit && <circle cx={tetherCx} cy={24} r={15} fill="#18181b" />}
               <circle
                 cx={tetherCx}
                 cy={24}
-                r={nextCommit ? 10 : 6}
+                r={nextCommit ? 13 : 8}
                 fill="none"
                 stroke={laneColor(headLane)}
-                strokeWidth={2}
-                strokeDasharray={nextCommit ? '3 3' : '2 4'}
+                strokeWidth={nextCommit ? 2.5 : 2}
+                strokeDasharray={nextCommit ? "3 3" : "2 4"}
                 opacity={nextCommit ? 0.85 : 0.55}
               />
             </svg>
@@ -663,8 +663,8 @@ function PreviewOverlay({
           data-testid="preview-ghost"
         >
           <svg width="100%" height={ghostSlot + ROW_H}>
-            {ghostIdx > 0 && <circle cx={lx(targetLane)} cy={ROW_H / 2} r={15} fill="#18181b" />}
-            <circle cx={lx(targetLane)} cy={ROW_H / 2} r={10} fill="none" stroke={VIOLET} strokeWidth={2} strokeDasharray="3 3" opacity={0.8} />
+            {ghostIdx > 0 && <circle cx={lx(targetLane)} cy={ROW_H / 2} r={18} fill="#18181b" />}
+            <circle cx={lx(targetLane)} cy={ROW_H / 2} r={13} fill="none" stroke={VIOLET} strokeWidth={2} strokeDasharray="3 3" opacity={0.8} />
             <line x1={lx(targetLane)} y1={ROW_H / 2 + 10} x2={lx(targetLane)} y2={ghostSlot + ROW_H / 2} stroke={VIOLET} strokeWidth={2} strokeDasharray="2 5" opacity={0.5} />
           </svg>
         </div>
