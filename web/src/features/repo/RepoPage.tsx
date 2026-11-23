@@ -422,12 +422,12 @@ export default function RepoPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [detailsSha])
 
-  // keep the top commit node at a FIXED screen distance: when the staging
-  // section above the graph collapses, the graph grows — pad its top by the
-  // distance the graph's own top edge moved up (measured directly, so
-  // margins/borders count), and drop the pad on expand. The open-state top
-  // is remembered so a page loaded with the section already collapsed still
-  // gets the default-open distance.
+  // keep the top commit node at a FIXED screen distance: the graph's top is
+  // padded by however far its own top edge moved up vs the section's FULL
+  // open state (measured directly, so margins/borders count). The canonical
+  // anchor is the tallest open section seen — commit box visible — so BOTH
+  // collapsing the section AND the box hiding on a clean tree compensate;
+  // the node never rides up.
   const stagingOpen = useUiStore((s) => s.stagingOpen)
   const stagingSectionRef = useRef<HTMLDivElement>(null)
   const graphWrapRef = useRef<HTMLDivElement>(null)
@@ -440,11 +440,9 @@ export default function RepoPage() {
     const measure = () => {
       const top = wrap.getBoundingClientRect().top
       if (stagingOpen) {
-        openGraphTop.current = top
-        setGraphTopInset(0)
-      } else {
-        setGraphTopInset(Math.max(0, Math.round((openGraphTop.current ?? top) - top)))
+        openGraphTop.current = Math.max(openGraphTop.current ?? top, top)
       }
+      setGraphTopInset(Math.max(0, Math.round((openGraphTop.current ?? top) - top)))
     }
     measure()
     const ro = new ResizeObserver(measure)

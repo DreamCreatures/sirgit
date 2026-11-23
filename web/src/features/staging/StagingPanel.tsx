@@ -194,7 +194,14 @@ export default function StagingPanel({
       .filter((f) => !skip.has(f.path) && !f.conflict && (f.untracked || (f.indexStatus === '.' && f.worktreeStatus !== '.')))
       .map((f) => f.path)
     const sig = toStage.join('\u{1f}')
-    if (toStage.length === 0 || sig === lastAutoStage.current) return
+    if (toStage.length === 0) {
+      // nothing pending: forget the last attempt so the SAME file set
+      // re-stages when it reappears (commit → uncommit returns exactly the
+      // same list, and the once-per-signature guard would swallow it)
+      lastAutoStage.current = ''
+      return
+    }
+    if (sig === lastAutoStage.current) return
     const t = setTimeout(() => {
       lastAutoStage.current = sig
       void api
