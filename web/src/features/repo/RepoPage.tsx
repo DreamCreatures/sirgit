@@ -424,29 +424,32 @@ export default function RepoPage() {
 
   // keep the top commit node at a FIXED screen distance: when the staging
   // section above the graph collapses, the graph grows — pad its top by the
-  // height the section gave up (and drop the pad on expand), so the first
-  // row stays exactly where the open state put it. The open height is
-  // remembered so a page loaded with the section already collapsed still
+  // distance the graph's own top edge moved up (measured directly, so
+  // margins/borders count), and drop the pad on expand. The open-state top
+  // is remembered so a page loaded with the section already collapsed still
   // gets the default-open distance.
   const stagingOpen = useUiStore((s) => s.stagingOpen)
   const stagingSectionRef = useRef<HTMLDivElement>(null)
+  const graphWrapRef = useRef<HTMLDivElement>(null)
   const [graphTopInset, setGraphTopInset] = useState(0)
-  const openSectionH = useRef(224) // the max-h-56 default-open height
+  const openGraphTop = useRef<number | null>(null)
   useEffect(() => {
-    const el = stagingSectionRef.current
-    if (!el) return
+    const section = stagingSectionRef.current
+    const wrap = graphWrapRef.current
+    if (!section || !wrap) return
     const measure = () => {
-      const h = el.offsetHeight
+      const top = wrap.getBoundingClientRect().top
       if (stagingOpen) {
-        openSectionH.current = h
+        openGraphTop.current = top
         setGraphTopInset(0)
       } else {
-        setGraphTopInset(Math.max(0, openSectionH.current - h))
+        setGraphTopInset(Math.max(0, Math.round((openGraphTop.current ?? top) - top)))
       }
     }
     measure()
     const ro = new ResizeObserver(measure)
-    ro.observe(el)
+    ro.observe(section)
+    ro.observe(wrap)
     return () => ro.disconnect()
   }, [stagingOpen])
 
@@ -737,7 +740,7 @@ export default function RepoPage() {
           <div ref={stagingSectionRef} className="shrink-0">
             <StagingPanel path={path} headSha={refs?.head?.sha} headBranch={currentBranch} />
           </div>
-          <div className="relative min-h-0 flex-1">
+          <div ref={graphWrapRef} className="relative min-h-0 flex-1">
             <GraphView
               refBySha={refBySha}
               topInset={graphTopInset}
