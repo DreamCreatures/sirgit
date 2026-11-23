@@ -285,7 +285,10 @@ export default function StagingPanel({
                 {commitMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 {amend ? 'Amend commit' : 'Commit'}
               </button>
-              <label className="flex items-center gap-1.5 text-xs text-zinc-400" title="Load the last commit's message; commit replaces it keeping changes staged">
+              <label
+                className="flex items-center gap-1.5 text-xs text-zinc-400"
+                title="Rewrite the last commit — your current changes (staged or not) fold into it; the message box loads its message for editing"
+              >
                 <input
                   type="checkbox"
                   checked={amend}

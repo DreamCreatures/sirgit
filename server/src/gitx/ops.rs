@@ -59,6 +59,12 @@ pub async fn commit(
     let w = repo_or_err(repo)?;
     let mut args = vec!["commit".to_string(), "--file=-".to_string()];
     if amend {
+        // fold the CURRENT worktree state into the amended commit (add -A):
+        // the user's model of amend is "HEAD + what I have now" — a staged-
+        // only amend silently dropped unstaged changes when the commit box
+        // enabled on amend alone. Clean tree: add -A is a no-op, so message-
+        // only amends keep working.
+        run_git(&w, &["add".into(), "-A".into()], GitKind::Mutation).await?;
         args.push("--amend".into());
     }
     if allow_empty {
@@ -881,6 +887,51 @@ mod tests {
         assert_eq!(b64_url(b"fo"), "Zm8-");
         assert_eq!(b64_url(b"foo"), "Zm9v");
         assert_eq!(b64_url(b"foobar"), "Zm9vYmFy");
+    }
+
+    /// Amend folds the CURRENT worktree state into the rewritten commit
+    /// (user rule: "amend commits should include changes of README.md") —
+    /// both a modified tracked file and a brand-new one, staged or not; a
+    /// clean tree still amends message-only.
+    #[tokio::test]
+    async fn amend_folds_current_worktree_changes() {
+        let tmp = std::env::temp_dir().join(format!("sirgit-amend-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        assert!(git(&["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&["config", "user.name", "T"]).status.success());
+        assert!(git(&["config", "user.email", "t@sirgit.test"]).status.success());
+        std::fs::write(tmp.join("README.md"), "original\n").unwrap();
+        assert!(git(&["add", "."]).status.success());
+        assert!(git(&["commit", "-q", "-m", "c1"]).status.success());
+        let p = tmp.to_str().unwrap();
+        let head_readme = || String::from_utf8(git(&["show", "HEAD:README.md"]).stdout).unwrap();
+        let clean = || String::from_utf8_lossy(&git(&["status", "--porcelain"]).stdout).trim().is_empty();
+
+        // case 1: README modified (unstaged!) + a brand-new file — both fold in
+        std::fs::write(tmp.join("README.md"), "original\nplus new line\n").unwrap();
+        std::fs::write(tmp.join("NEW.md"), "new file\n").unwrap();
+        commit(p, "amended", true, true).await.unwrap();
+        assert_eq!(head_readme(), "original\nplus new line\n", "amend must include the worktree README changes");
+        assert_eq!(String::from_utf8(git(&["show", "HEAD:NEW.md"]).stdout).unwrap(), "new file\n");
+        assert!(clean(), "amend consumed the worktree changes");
+
+        // case 2: message-only amend on a clean tree still works (same subject rewritten)
+        commit(p, "message tweak", true, true).await.unwrap();
+        assert!(String::from_utf8_lossy(&git(&["log", "-1", "--format=%s"]).stdout).trim() == "message tweak");
+        assert!(clean());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// checkout carry: a dirty worktree either follows to the target branch
