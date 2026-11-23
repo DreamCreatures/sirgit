@@ -23,6 +23,10 @@ import StashSection from './StashSection'
 
 type FileAction = 'stage' | 'unstage' | 'discard' | 'resolve'
 
+// stable empty array — the zustand selector's `??` fallback must keep one
+// identity or the component re-renders in a loop
+const NO_FILES: string[] = []
+
 interface GroupFile {
   path: string
   origPath?: string
@@ -172,6 +176,34 @@ export default function StagingPanel({
   const conflicts = useMemo(() => files.filter((f) => f.conflict), [files])
 
   const inProgress = (status?.inMerge ?? false) || (status?.inRebase ?? false) || (status?.inCherry ?? false) || (status?.inRevert ?? false)
+
+  // default-staged workflow (user rule): new changes — modified or
+  // untracked — stage THEMSELVES, unless the user explicitly unstaged that
+  // file (per-repo opt-out, persisted; refresh restores the exact
+  // select/unselect state). Never during an in-progress merge/rebase
+  // (staging would auto-resolve conflicts), never while another staging op
+  // is mid-flight, and at most one attempt per file-set (a failed add must
+  // not retry-loop on every status refetch).
+  const setUnstagedByUser = useUiStore((s) => s.setUnstagedByUser)
+  const autoSkip = useUiStore((s) => s.unstagedByUser[path] ?? NO_FILES)
+  const lastAutoStage = useRef('')
+  useEffect(() => {
+    if (!status || inProgress || pendingKey) return
+    const skip = new Set(autoSkip)
+    const toStage = files
+      .filter((f) => !skip.has(f.path) && !f.conflict && (f.untracked || (f.indexStatus === '.' && f.worktreeStatus !== '.')))
+      .map((f) => f.path)
+    const sig = toStage.join('\u{1f}')
+    if (toStage.length === 0 || sig === lastAutoStage.current) return
+    const t = setTimeout(() => {
+      lastAutoStage.current = sig
+      void api
+        .stage(path, toStage)
+        .then(() => qc.invalidateQueries({ queryKey: ['status', path] }))
+        .catch(() => undefined)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [status, files, inProgress, pendingKey, autoSkip, path, qc])
   // amend doesn't need staged changes (it reuses HEAD's tree) — message edits alone are a valid amend
   const canCommit = (staged.length > 0 || amend) && title.trim().length > 0 && conflicts.length === 0
   // nothing to commit → no commit box: with a clean worktree the changes pane
@@ -224,7 +256,10 @@ export default function StagingPanel({
             className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-40"
             title="Stage every change for the next commit (git add .)"
             disabled={pendingKey === 'stage:__all' || (unstaged.length === 0 && untracked.length === 0)}
-            onClick={() => runAction('stage:__all', () => api.stage(path, ['.']))}
+            onClick={() => {
+              setUnstagedByUser(path, []) // select-all clears every opt-out
+              runAction('stage:__all', () => api.stage(path, ['.']))
+            }}
             data-testid="stage-all"
           >
             {pendingKey === 'stage:__all' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
@@ -234,7 +269,11 @@ export default function StagingPanel({
             className="flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-300 hover:bg-red-500/25 disabled:opacity-40"
             title="Unstage everything (changes stay in the worktree)"
             disabled={pendingKey === 'unstage:__all' || staged.length === 0}
-            onClick={() => runAction('unstage:__all', () => api.unstage(path, staged.map((f) => f.path)))}
+            onClick={() => {
+              // everything being unstaged becomes opted-out (stays unstaged)
+              setUnstagedByUser(path, staged.map((f) => f.path))
+              runAction('unstage:__all', () => api.unstage(path, staged.map((f) => f.path)))
+            }}
             data-testid="unstage-all"
           >
             {pendingKey === 'unstage:__all' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Minus className="h-3.5 w-3.5" />}
@@ -365,12 +404,15 @@ export default function StagingPanel({
             openDiffs={openDiffs}
             toggleDiff={toggleDiff}
             onAction={(file, action) => {
-              if (action === 'unstage') runAction(`unstage:${file}`, () => api.unstage(path, [file]))
+              if (action === 'unstage') {
+                // explicit unstage = opt out of the default-staged workflow
+                setUnstagedByUser(path, [...new Set([...autoSkip, file])])
+                runAction(`unstage:${file}`, () => api.unstage(path, [file]))
+              }
               if (action === 'discard') {
                 useUiStore.getState().setDialog({
                   kind: 'confirm',
-                  title: `Discard ${file}`,
-                  message: 'Resets the file to HEAD — the staged changes and the file content are lost. This cannot be undone.',
+                  title: `Discard ${file}`,                  message: 'Resets the file to HEAD — the staged changes and the file content are lost. This cannot be undone.',
                   confirmLabel: 'Discard',
                   danger: true,
                   onConfirm: () => runAction(`discard:${file}`, () => api.discard(path, [file], [])),
@@ -388,7 +430,10 @@ export default function StagingPanel({
             openDiffs={openDiffs}
             toggleDiff={toggleDiff}
             onAction={(file, action) => {
-              if (action === 'stage') runAction(`stage:${file}`, () => api.stage(path, [file]))
+              if (action === 'stage') {
+                setUnstagedByUser(path, autoSkip.filter((f) => f !== file)) // staging clears the opt-out
+                runAction(`stage:${file}`, () => api.stage(path, [file]))
+              }
               if (action === 'discard') {
                 useUiStore.getState().setDialog({
                   kind: 'confirm',
@@ -411,7 +456,10 @@ export default function StagingPanel({
             openDiffs={openDiffs}
             toggleDiff={toggleDiff}
             onAction={(file, action) => {
-              if (action === 'stage') runAction(`stage:${file}`, () => api.stage(path, [file]))
+              if (action === 'stage') {
+                setUnstagedByUser(path, autoSkip.filter((f) => f !== file)) // staging clears the opt-out
+                runAction(`stage:${file}`, () => api.stage(path, [file]))
+              }
               if (action === 'discard') {
                 useUiStore.getState().setDialog({
                   kind: 'confirm',

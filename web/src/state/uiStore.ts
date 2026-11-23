@@ -60,8 +60,19 @@ interface UiState {
   dialog: AppDialog | null
   setDialog(d: AppDialog | null): void
 
+  /** Staging/commit section expanded (persisted — refresh restores) */
   stagingOpen: boolean
   toggleStaging(): void
+
+  /**
+   * Default-staged workflow (user rule): changes auto-stage, but a file the
+   * user explicitly UNSTAGED is skipped by the auto-stager until they stage
+   * it again — the opt-out list is per repo and persisted, so a refresh
+   * restores the exact select/unselect/untracked state (git's index carries
+   * the staged side; this carries the opted-out side).
+   */
+  unstagedByUser: Record<string, string[]>
+  setUnstagedByUser(repo: string, files: string[]): void
 
   /** Stash section (above the staging area) expanded */
   stashOpen: boolean
@@ -187,6 +198,16 @@ let toastId = 0
 
 const RECENTS_KEY = 'sirgit.recentRepos'
 const REPOS_KEY = 'sirgit.repos'
+const UNSTAGED_KEY = 'sirgit.unstagedByUser'
+
+function loadUnstagedByUser(): Record<string, string[]> {
+  try {
+    const v = JSON.parse(localStorage.getItem(UNSTAGED_KEY) ?? '{}') as Record<string, string[]>
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+  } catch {
+    return {}
+  }
+}
 
 function loadRepos(): string[] {
   try {
@@ -239,8 +260,21 @@ export const useUiStore = create<UiState>((set, get) => ({
   dialog: null,
   setDialog: (d) => set({ dialog: d }),
 
-  stagingOpen: true,
-  toggleStaging: () => set((s) => ({ stagingOpen: !s.stagingOpen })),
+  stagingOpen: localStorage.getItem('sirgit.stagingOpen') !== '0',
+  toggleStaging: () =>
+    set((s) => {
+      const next = !s.stagingOpen
+      localStorage.setItem('sirgit.stagingOpen', next ? '1' : '0')
+      return { stagingOpen: next }
+    }),
+
+  unstagedByUser: loadUnstagedByUser(),
+  setUnstagedByUser: (repo, files) =>
+    set((s) => {
+      const next = { ...s.unstagedByUser, [repo]: files }
+      localStorage.setItem(UNSTAGED_KEY, JSON.stringify(next))
+      return { unstagedByUser: next }
+    }),
 
   stashOpen: true,
   toggleStash: () => set((s) => ({ stashOpen: !s.stashOpen })),
