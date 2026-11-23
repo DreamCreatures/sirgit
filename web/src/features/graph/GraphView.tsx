@@ -8,6 +8,8 @@ import GraphRow from './GraphRow'
 import GraphEdges, { laneColor } from './GraphEdges'
 
 export const ROW_H = 44
+/** extra room in the reserved top slot — the initial ghost→HEAD distance */
+const GHOST_PAD = 20
 // lane spacing: wide enough that a sibling lane's curve reaches the big HEAD
 // node (r 15 + faint ring) steeply instead of slicing along its edge band
 const LANE_W = 46
@@ -133,7 +135,9 @@ export default function GraphView({
   const ghostIdx = ghostSha ? ordered.findIndex((r) => r.sha === ghostSha) : -1
   const ghostLane = ghostIdx >= 0 ? (laneLayout.lanes.get(ghostSha!) ?? -1) : -1
   const showGhost = ghostIdx >= 0 && ghostLane >= 0
-  const ghostOffset = (totalRows > 0 ? ROW_H : 0) + topInset
+  // the reserved slot above row 0 (ghost node + tether rest) is a BIT
+  // taller than one row — the initial ghost→HEAD distance reads better
+  const ghostOffset = (totalRows > 0 ? ROW_H + GHOST_PAD : 0) + topInset
   // --- selection gap: while a row's action popup is up, that row gains
   // breathing room on BOTH sides — 50% of a row height above and below —
   // so the bar never covers the row ABOVE, which is exactly the move/drag
@@ -150,7 +154,10 @@ export default function GraphView({
   // two (the gap above it + the gap below it)
   const gapShift = (i: number) => (selGapIdx < 0 || i < selGapIdx ? 0 : i === selGapIdx ? SEL_GAP : 2 * SEL_GAP)
   const rowTop = (i: number) => i * ROW_H + ghostOffset + gapShift(i)
-  const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H : rowTop(ghostIdx - 1)
+  // row-0 anchors get the taller reserved slot; deeper anchors overlay the
+  // row above with the plain one-row window
+  const ghostSlot = ghostIdx <= 0 ? ROW_H + GHOST_PAD : ROW_H
+  const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H - GHOST_PAD : rowTop(ghostIdx - 1)
   const contentH = totalRows * ROW_H + ghostOffset + (selGapIdx >= 0 ? 2 * SEL_GAP : 0)
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
   // extra window rows at the bottom when the gap shifts rows down out of
@@ -272,11 +279,11 @@ export default function GraphView({
               top: ghostTop,
               left: originX,
               width: Math.max(120, laneX(laneLayout.laneCount) + 20 + originX),
-              height: 2 * ROW_H,
+              height: ghostSlot + ROW_H,
             }}
             data-testid="ghost-commit"
           >
-            <svg width="100%" height={2 * ROW_H}>
+            <svg width="100%" height={ghostSlot + ROW_H}>
               {ghostIdx > 0 && <circle cx={laneX(ghostLane)} cy={ROW_H / 2} r={15} fill="#18181b" />}
               <circle
                 cx={laneX(ghostLane)}
@@ -292,7 +299,7 @@ export default function GraphView({
                 x1={laneX(ghostLane)}
                 y1={ROW_H / 2 + 10}
                 x2={laneX(ghostLane)}
-                y2={1.5 * ROW_H}
+                y2={ghostSlot + ROW_H / 2}
                 stroke={laneColor(ghostLane)}
                 strokeWidth={2}
                 strokeDasharray="2 5"
@@ -593,9 +600,11 @@ function PreviewOverlay({
   const stack = preview.op === 'rebase' ? run.slice(0, PREVIEW_CAP) : []
   const capped = preview.op === 'rebase' && run.length > PREVIEW_CAP
 
-  // squash: the ghosted single replacement commit above the target
+  // squash: the ghosted single replacement commit above the target — a
+  // row-0 target gets the taller reserved slot, deeper targets one row
   const ghostIdx = preview.op === 'squash' ? targetIdx : -1
-  const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H : rowTop(ghostIdx - 1)
+  const ghostSlot = ghostIdx <= 0 ? ROW_H + GHOST_PAD : ROW_H
+  const ghostTop = ghostIdx <= 0 ? rowTop(0) - ROW_H - GHOST_PAD : rowTop(ghostIdx - 1)
 
   return (
     <>
@@ -650,13 +659,13 @@ function PreviewOverlay({
       {preview.op === 'squash' && (
         <div
           className="pointer-events-none absolute left-0"
-          style={{ top: ghostTop, width: Math.max(120, lx(lanes.size) + 20), height: 2 * ROW_H }}
+          style={{ top: ghostTop, width: Math.max(120, lx(lanes.size) + 20), height: ghostSlot + ROW_H }}
           data-testid="preview-ghost"
         >
-          <svg width="100%" height={2 * ROW_H}>
+          <svg width="100%" height={ghostSlot + ROW_H}>
             {ghostIdx > 0 && <circle cx={lx(targetLane)} cy={ROW_H / 2} r={15} fill="#18181b" />}
             <circle cx={lx(targetLane)} cy={ROW_H / 2} r={10} fill="none" stroke={VIOLET} strokeWidth={2} strokeDasharray="3 3" opacity={0.8} />
-            <line x1={lx(targetLane)} y1={ROW_H / 2 + 10} x2={lx(targetLane)} y2={1.5 * ROW_H} stroke={VIOLET} strokeWidth={2} strokeDasharray="2 5" opacity={0.5} />
+            <line x1={lx(targetLane)} y1={ROW_H / 2 + 10} x2={lx(targetLane)} y2={ghostSlot + ROW_H / 2} stroke={VIOLET} strokeWidth={2} strokeDasharray="2 5" opacity={0.5} />
           </svg>
         </div>
       )}
@@ -676,7 +685,7 @@ function PreviewOverlay({
           if (intoIdx < 0 || tipIdx < 0) return null
           // ghost circle center — mirrors GraphView's ghost anchoring
           const gx = lx(laneOf(preview.targetSha))
-          const gy = (intoIdx <= 0 ? rowTop(0) - ROW_H : rowTop(intoIdx - 1)) + ROW_H / 2
+          const gy = (intoIdx <= 0 ? rowTop(0) - ROW_H - GHOST_PAD : rowTop(intoIdx - 1)) + ROW_H / 2
           const tx = lx(laneOf(preview.subjectTipSha))
           const ty = rowTop(tipIdx) + ROW_H / 2
           const left = Math.min(gx, tx) - 24
