@@ -20,6 +20,10 @@ export function laneX(lane: number): number {
 
 interface GraphViewProps {
   refBySha: Map<string, RefInfo[]>
+  /** extra top inset (px) — keeps the first commit node at a FIXED screen
+   *  distance when the staging section above the graph collapses (the inset
+   *  pads the graph by the height the section gave up); 0 while it is open */
+  topInset?: number
   /** tag names known to be on the remote (ls-remote cache) — pushed-tag chips */
   remoteTags?: string[]
   /** the remote those tags came from — pushed-tag prefixes name the real remote */
@@ -56,6 +60,7 @@ interface GraphViewProps {
  */
 export default function GraphView({
   refBySha,
+  topInset = 0,
   remoteTags,
   remoteTagRemote,
   headSha,
@@ -128,7 +133,7 @@ export default function GraphView({
   const ghostIdx = ghostSha ? ordered.findIndex((r) => r.sha === ghostSha) : -1
   const ghostLane = ghostIdx >= 0 ? (laneLayout.lanes.get(ghostSha!) ?? -1) : -1
   const showGhost = ghostIdx >= 0 && ghostLane >= 0
-  const ghostOffset = totalRows > 0 ? ROW_H : 0
+  const ghostOffset = (totalRows > 0 ? ROW_H : 0) + topInset
   // --- selection gap: while a row's action popup is up, that row gains
   // breathing room on BOTH sides — 50% of a row height above and below —
   // so the bar never covers the row ABOVE, which is exactly the move/drag
@@ -182,7 +187,7 @@ export default function GraphView({
   const headAboveViewport = headCenterY < scrollTop + ROW_H / 2
   const tetherTop = headAboveViewport
     ? scrollTop + ROW_H / 2
-    : Math.max(ROW_H / 2, Math.min(scrollTop + ROW_H / 2, headCenterY - ROW_H))
+    : Math.max(topInset + ROW_H / 2, Math.min(scrollTop + ROW_H / 2, headCenterY - ROW_H))
   const tetherRows = Math.max(0, Math.round(Math.abs(headCenterY - tetherTop) / ROW_H) - (headAboveViewport ? 0 : 1))
 
   const visibleRows = useMemo(() => ordered.slice(start, end), [ordered, start, end])

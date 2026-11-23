@@ -405,8 +405,7 @@ export default function RepoPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  // details drawer: outside click (not drawer, not rows) closes it and the selection
-  useEffect(() => {
+  // details drawer: outside click (not drawer, not rows) closes it and the selection  useEffect(() => {
     if (!detailsSha) return
     const handler = (e: MouseEvent) => {
       const t = e.target as HTMLElement
@@ -422,12 +421,35 @@ export default function RepoPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [detailsSha])
 
+  // keep the top commit node at a FIXED screen distance: when the staging
+  // section above the graph collapses, the graph grows — pad its top by the
+  // height the section gave up (and drop the pad on expand), so the first
+  // row stays exactly where the open state put it. The open height is
+  // remembered so a page loaded with the section already collapsed still
+  // gets the default-open distance.
+  const stagingOpen = useUiStore((s) => s.stagingOpen)
+  const stagingSectionRef = useRef<HTMLDivElement>(null)
+  const [graphTopInset, setGraphTopInset] = useState(0)
+  const openSectionH = useRef(224) // the max-h-56 default-open height
+  useEffect(() => {
+    const el = stagingSectionRef.current
+    if (!el) return
+    const measure = () => {
+      const h = el.offsetHeight
+      if (stagingOpen) {
+        openSectionH.current = h
+        setGraphTopInset(0)
+      } else {
+        setGraphTopInset(Math.max(0, openSectionH.current - h))
+      }
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [stagingOpen])
+
   const refreshAll = () => {
-    void qc.invalidateQueries({ queryKey: ['refs', path] })
-    void qc.invalidateQueries({ queryKey: ['status', path] })
-    void qc.invalidateQueries({ queryKey: ['stash', path] })
-    void applyDelta()
-  }
 
   const netOp = async (fn: () => Promise<{ opId: string }>, done: string) => {
     const label = done.replace(' complete', '')
@@ -706,10 +728,13 @@ export default function RepoPage() {
       <div className="relative flex min-h-0 flex-1">
         <RefsPanel path={path} onCheckout={guardedCheckout} />
         <main className="flex min-w-0 flex-1 flex-col">
-          <StagingPanel path={path} headSha={refs?.head?.sha} headBranch={currentBranch} />
+          <div ref={stagingSectionRef} className="shrink-0">
+            <StagingPanel path={path} headSha={refs?.head?.sha} headBranch={currentBranch} />
+          </div>
           <div className="relative min-h-0 flex-1">
             <GraphView
               refBySha={refBySha}
+              topInset={graphTopInset}
           remoteTags={refs?.remoteTags ?? []}
           remoteTagRemote={refs?.remoteTagsRemote ?? null}
               headSha={refs?.head?.sha ?? null}
