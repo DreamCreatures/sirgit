@@ -522,21 +522,23 @@ export default function StagingPanel({
                 </button>
               )}
             </div>
+
+            {/* drawer-pull handle on the bottom-center edge of whatever this
+             * body is — the compact inline bar (anchors to the section) or
+             * the grown overlay panel (the body itself is positioned, so the
+             * tab straddles the panel's bottom edge, where it belongs) */}
+            <button
+              className="absolute bottom-[-9px] left-1/2 z-10 flex h-[18px] w-16 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 shadow-md hover:bg-zinc-800 hover:text-zinc-200"
+              title={stagingExpanded ? 'Shrink the staging area back to the compact bar' : 'Grow the staging area for more room'}
+              onClick={() => setStagingExpanded(!stagingExpanded)}
+              data-testid="staging-expand"
+            >
+              {stagingExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
           </div>
         </div>
       )}
       </div>
-
-      {/* drawer-pull handle on the bottom-center edge: grows the staging
-          section inline (taller commit box + changes) / shrinks it back */}
-      <button
-        className="absolute bottom-[-9px] left-1/2 z-10 flex h-[18px] w-16 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 shadow-md hover:bg-zinc-800 hover:text-zinc-200"
-        title={stagingExpanded ? 'Shrink the staging area back to the compact bar' : 'Grow the staging area for more room'}
-        onClick={() => setStagingExpanded(!stagingExpanded)}
-        data-testid="staging-expand"
-      >
-        {stagingExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-      </button>
     </section>
   )
 }
