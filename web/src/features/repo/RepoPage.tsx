@@ -151,6 +151,11 @@ export default function RepoPage() {
     selectedRef?.kind === 'branch'
       ? (refBySha.get(selectedSha ?? '') ?? []).find((r) => r.type === 'branch' && r.name === selectedRef.name)
       : undefined
+  // remote twin of selBranch: an armed origin/x drives mergeInto's remote path
+  const selRemote =
+    selectedRef?.kind === 'remote-branch'
+      ? (refBySha.get(selectedSha ?? '') ?? []).find((r) => r.type === 'remote-branch' && r.name === selectedRef.name)
+      : undefined
   const currentBranch = refs?.head?.branch
   const pullBranch = currentBranch ?? null
   // the prospective next commit: something staged, or an in-flight merge /
@@ -385,34 +390,47 @@ export default function RepoPage() {
         ),
     })
   }
-  // merge the armed branch into another branch (row buttons). The SOURCE
-  // branch is synced FIRST (user rule: "git pull main, then merge main into
-  // branchA"): fetch --prune its upstream, fast-forward it when behind —
-  // merging a stale branch is exactly the error this avoids. The fetch needs
-  // the network-op plumbing, so it runs client-side before the merge call;
-  // when the upstream is unreachable the merge does NOT run (merging a
+  // merge the armed ref into another branch (row buttons). The SOURCE is
+  // synced FIRST (user rule: "git pull main, then merge main into branchA"):
+  // a local source fetches --prune its upstream and fast-forwards it when
+  // behind; a REMOTE source (origin/x) fetches the remote so the tracking ref
+  // is at its latest published state — then git merges it straight into HEAD,
+  // no checkout round-trip. Merging a stale source is exactly the error this
+  // avoids; when the fetch fails the merge does NOT run (merging a
   // knowingly-stale branch silently would be worse) and the reason surfaces.
   const mergeInto = (into: string, squash: boolean) => {
-    if (!selBranch) return
-    const from = selBranch.name
-    const upstream = from !== currentBranch ? selBranch.upstream : undefined
+    if (!selBranch && !selRemote) return
+    const from = selBranch?.name ?? selRemote!.name
+    const remoteSource = !!selRemote && !selBranch
+    const upstream = selBranch && from !== currentBranch ? selBranch.upstream : undefined
     useUiStore.getState().beginOp(squash ? 'Squash merge' : 'Merge')
-    const prep = upstream
+    const prep = remoteSource
       ? (async () => {
-          const remote = upstream.split('/')[0]
+          const remote = from.split('/')[0]
           useUiStore.getState().setNetBusy('Fetch')
           try {
             const { opId } = await api.fetch(path, remote)
             await pollOp(opId)
-            // fast-forward `from` to its upstream (no checkout; up-to-date is a
-            // no-op, divergence refuses — a refused sync must not fall through
-            // into a merge against the stale branch)
-            await api.branchFastForward(path, from, upstream, false)
           } finally {
             useUiStore.getState().setNetBusy(null)
           }
         })()
-      : Promise.resolve()
+      : upstream
+        ? (async () => {
+            const remote = upstream.split('/')[0]
+            useUiStore.getState().setNetBusy('Fetch')
+            try {
+              const { opId } = await api.fetch(path, remote)
+              await pollOp(opId)
+              // fast-forward `from` to its upstream (no checkout; up-to-date is a
+              // no-op, divergence refuses — a refused sync must not fall through
+              // into a merge against the stale branch)
+              await api.branchFastForward(path, from, upstream, false)
+            } finally {
+              useUiStore.getState().setNetBusy(null)
+            }
+          })()
+        : Promise.resolve()
     prep
       .then(() => api.branchMerge(path, from, into, squash))
       .then((res) => {

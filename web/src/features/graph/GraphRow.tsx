@@ -186,10 +186,16 @@ function GraphRowInner({
   // merging requires one of the two branches to be the checked-out one:
   // - HEAD armed → [merge]/[squash merge] on ALL other branch rows (they receive HEAD)
   // - non-HEAD armed → only the HEAD row shows the buttons (it receives the armed branch)
+  // - a REMOTE branch armed (origin/x) → the HEAD row again: git merges the
+  //   remote-TRACKING ref straight into HEAD — no checkout round-trip, the
+  //   fetch in mergeInto's prep keeps origin/x at its latest published state
   const armedBranch = armed && !armed.remote ? armed.name : null
   const mergeIntoBranch = (() => {
-    if (!armedBranch || !onRowAction || !currentBranch) return undefined
+    if (!armed || !onRowAction || !currentBranch) return undefined
     const rowBranches = chips.filter((rf) => rf.type === 'branch').map((rf) => rf.name)
+    if (armed.remote) {
+      return rowBranches.includes(currentBranch) ? currentBranch : undefined
+    }
     if (armedBranch === currentBranch) {
       return rowBranches.find((n) => n !== currentBranch)
     }
@@ -201,7 +207,7 @@ function GraphRowInner({
   // squash-merging into a NON-checked-out branch needs a worktree we
   // don't control. The server's typed error remains the final guard for
   // cases the loaded window can't see through.
-  const mergeNoop = !!(armedBranch && mergeIntoBranch && armed && containsCommit(row.sha, armed.tipSha))
+  const mergeNoop = !!(armed && mergeIntoBranch && containsCommit(row.sha, armed.tipSha))
   const squashMergePossible = mergeIntoBranch === currentBranch
   // squash collapses the armed branch's tip DOWN TO this row: the target
   // must be an ancestor of the tip, else there is nothing to collapse
@@ -521,18 +527,19 @@ function GraphRowInner({
             </button>
           )}
 
-          {/* merge into this row's local branch, from the armed branch — hidden
-           * entirely when the merge can only be a no-op (target already contains
-           * the armed branch); squash merge additionally requires the target to
-           * be checked out (it stages through the worktree) */}
-          {mergeIntoBranch && armedBranch && !mergeNoop && (
+          {/* merge into this row's local branch, from the armed ref (a local
+           * branch OR a remote-tracking origin/x) — hidden entirely when the
+           * merge can only be a no-op (target already contains the armed
+           * ref); squash merge additionally requires the target to be checked
+           * out (it stages through the worktree) */}
+          {mergeIntoBranch && armed && !mergeNoop && (
             <>
               <button
                 className="shrink-0 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-300 hover:bg-sky-500/25"
                 title={
                   mergeIntoBranch === currentBranch
-                    ? `Merge "${armedBranch}" into "${mergeIntoBranch}" (fast-forward when possible; conflicts surface in the staging area)`
-                    : `Merge "${armedBranch}" into "${mergeIntoBranch}" (fast-forward only — "${mergeIntoBranch}" is not checked out)`
+                    ? `Merge "${armed.name}" into "${mergeIntoBranch}" (fast-forward when possible; conflicts surface in the staging area)`
+                    : `Merge "${armed.name}" into "${mergeIntoBranch}" (fast-forward only — "${mergeIntoBranch}" is not checked out)`
                 }
                 onClick={(e) => {
                   e.stopPropagation()
@@ -547,7 +554,7 @@ function GraphRowInner({
               {squashMergePossible && (
                 <button
                   className="shrink-0 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/25"
-                  title={`Squash-merge "${armedBranch}" into "${mergeIntoBranch}": stage all of its changes as one — no merge commit; you write the message`}
+                  title={`Squash-merge "${armed.name}" into "${mergeIntoBranch}": stage all of its changes as one — no merge commit; you write the message`}
                   onClick={(e) => {
                     e.stopPropagation()
                     onRowAction!('squash-merge', row.sha, mergeIntoBranch)

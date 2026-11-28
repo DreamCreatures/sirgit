@@ -27,6 +27,9 @@ pub struct LogPage {
 
 /// Windowed log page. Pages are disjoint for a fixed revision — the client
 /// appends them without re-fetching anything (ungit refetched ever-growing windows).
+/// Pages beyond the cached window (TOPO_CAP, truncated on big repos) come from
+/// an on-demand paged walk; their `total` is the lazily-computed true history
+/// size so the client's exhaustion check stays honest.
 pub async fn log_page(
     State(app): State<Arc<AppState>>,
     Query(q): Query<LogQuery>,
@@ -34,22 +37,54 @@ pub async fn log_page(
     let st = app.repo_state(&q.path).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let limit = q.limit.unwrap_or(app.config.page_size as u64).max(1);
     let offset = q.offset;
+    let start = offset as usize;
+    let end = start + limit as usize;
 
-    let mut topo = st.topo.lock().await;
-    let cache = ensure_topo(&mut topo, st.as_ref(), &q.path).await?;
-    let rows: Vec<Row> = cache
-        .rows
-        .iter()
-        .skip(offset as usize)
-        .take(limit as usize)
-        .cloned()
-        .collect();
-    Ok(Json(LogPage {
-        revision: st.current_revision(),
-        offset,
-        total: cache.rows.len() as u64,
-        rows,
-    }))
+    {
+        let mut topo = st.topo.lock().await;
+        let cache = ensure_topo(&mut topo, st.as_ref(), &q.path).await?;
+        if !cache.truncated {
+            // the WHOLE history is cached: serve any offset — a short page
+            // here is the true end of history (honest exhaustion)
+            let start_u = start.min(cache.rows.len());
+            let rows: Vec<Row> = cache.rows[start_u..].iter().take(limit as usize).cloned().collect();
+            return Ok(Json(LogPage {
+                revision: st.current_revision(),
+                offset,
+                total: cache.rows.len() as u64,
+                rows,
+            }));
+        }
+        // truncated: serve only pages fully inside the cached window. The
+        // window-edge total is len+1 ("more exists") so the client never
+        // stops paging at the cap; the page after the edge takes the deep
+        // walk below.
+        if start < cache.rows.len() && end <= cache.rows.len() {
+            let rows: Vec<Row> = cache.rows[start..end].to_vec();
+            return Ok(Json(LogPage {
+                revision: st.current_revision(),
+                offset,
+                total: cache.rows.len() as u64 + 1,
+                rows,
+            }));
+        }
+    }
+
+    // deep path: beyond (or at the edge of) a truncated cache's window
+    let total = {
+        let mut topo = st.topo.lock().await;
+        let cache = ensure_topo(&mut topo, st.as_ref(), &q.path).await?;
+        match cache.deep_total {
+            Some(t) => t,
+            None => {
+                let t = crate::gitx::log::count_all(&q.path).await.map_err(ApiError::Git)?;
+                cache.deep_total = Some(t);
+                t
+            }
+        }
+    };
+    let rows = crate::gitx::log::build_rows_paged(&q.path, offset, limit).await.map_err(ApiError::Git)?;
+    Ok(Json(LogPage { revision: st.current_revision(), offset, total, rows }))
 }
 
 #[derive(Deserialize)]
@@ -128,12 +163,13 @@ pub async fn log_delta(
 }
 
 /// Rebuild the topology cache if the repo revision moved (single-flight under
-/// the topo mutex; previous rows retained for exactly one revision).
+/// the topo mutex; previous rows retained for exactly one revision). Returns
+/// a MUTABLE reference so callers can fill lazily-computed fields (deep_total).
 pub async fn ensure_topo<'a>(
     topo: &'a mut tokio::sync::MutexGuard<'_, Option<TopoCache>>,
     st: &RepoState,
     path: &str,
-) -> ApiResult<&'a TopoCache> {
+) -> ApiResult<&'a mut TopoCache> {
     let current = st.current_revision();
     let needs_rebuild = match topo.as_ref() {
         Some(c) => c.revision < current,
@@ -141,13 +177,15 @@ pub async fn ensure_topo<'a>(
     };
     if needs_rebuild {
         let prev = topo.take().map(|c| (c.rows, c.revision));
-        let rows = build_rows(path).await.map_err(ApiError::Git)?;
+        let (rows, truncated) = build_rows(path).await.map_err(ApiError::Git)?;
         **topo = Some(TopoCache {
             revision: current,
+            truncated,
+            deep_total: None,
             prev_rows: prev.as_ref().map(|(r, _)| r.clone()),
             prev_revision: prev.map(|(_, rev)| rev),
             rows,
         });
     }
-    Ok(topo.as_ref().expect("topo cache just built"))
+    Ok(topo.as_mut().expect("topo cache just built"))
 }

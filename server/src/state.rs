@@ -37,6 +37,13 @@ pub enum RepoEvent {
 pub struct TopoCache {
     pub revision: u64,
     pub rows: Vec<Row>,
+    /// true: rows holds only the first TOPO_CAP commits — deeper pages are
+    /// fetched on demand (git log --skip) instead of cached
+    pub truncated: bool,
+    /// true total history size, computed lazily (rev-list --all --count) on
+    /// the first deep-page request — honest exhaustion for repos larger than
+    /// the cap without paying a second full walk on every rebuild
+    pub deep_total: Option<u64>,
     /// Previous revision's rows, retained for one revision so clients can sync deltas.
     pub prev_rows: Option<Vec<Row>>,
     pub prev_revision: Option<u64>,

@@ -60,9 +60,19 @@ pub fn parse_rows(stdout: &str) -> Vec<Row> {
     rows
 }
 
-/// Build the full ordered topology for a repo (all refs, date-order).
-/// Errors classified as no-commits/empty (fresh repos) yield an empty list.
-pub async fn build_rows(path: &str) -> Result<Vec<Row>, super::errors::GitError> {
+/// How much topology is CACHED per revision. Beyond this, pages are fetched
+/// on demand (git log --skip) — a full `--all` walk cost O(history) on EVERY
+/// revision bump (checkout/commit/merge and even the watcher seeing the op's
+/// own .git writes), which read as a 2-5s stale graph on real big projects.
+/// 10k rows covers every loaded window a session realistically holds; deeper
+/// history is old, stable, and walked only when someone actually scrolls
+/// that far.
+pub const TOPO_CAP: usize = 10_000;
+
+/// Build the ordered topology for a repo (all refs, date-order), capped at
+/// TOPO_CAP rows. Returns the rows plus whether history continues beyond the
+/// cap. Errors classified as no-commits/empty (fresh repos) yield an empty list.
+pub async fn build_rows(path: &str) -> Result<(Vec<Row>, bool), super::errors::GitError> {
     let (worktree, _gitdir) = resolve_repo_paths(path).map_err(|e| {
         super::errors::GitError::new("not-a-repository", e, "resolve-repo", "")
     })?;
@@ -72,6 +82,51 @@ pub async fn build_rows(path: &str) -> Result<Vec<Row>, super::errors::GitError>
         "--date-order".into(),
         format!("--format={}", LOG_FORMAT),
         "--no-color".into(),
+        // one row past the cap: its presence is the truncation signal
+        format!("-n {}", TOPO_CAP + 1),
+    ];
+    match run_git(&worktree, &args, GitKind::ReadOnly).await {
+        Ok(out) => {
+            let mut rows = parse_rows(&out.stdout);
+            let truncated = rows.len() > TOPO_CAP;
+            rows.truncate(TOPO_CAP);
+            Ok((rows, truncated))
+        }
+        Err(e) if e.code == "no-commits" || e.code == "bad-revision" || e.code == "not-a-repository" => Ok((Vec::new(), false)),
+        Err(e) => Err(e),
+    }
+}
+
+/// True total commit count across all refs. O(history) but a bare count (no
+/// record pipe, no parse) — paid once per revision, lazily, only when a
+/// client actually pages beyond the cached window.
+pub async fn count_all(path: &str) -> Result<u64, super::errors::GitError> {
+    let (worktree, _gitdir) = resolve_repo_paths(path).map_err(|e| {
+        super::errors::GitError::new("not-a-repository", e, "resolve-repo", "")
+    })?;
+    let args = vec!["rev-list".into(), "--all".into(), "--count".into()];
+    match run_git(&worktree, &args, GitKind::ReadOnly).await {
+        Ok(out) => Ok(out.stdout.trim().parse().unwrap_or(0)),
+        Err(e) if e.code == "no-commits" || e.code == "bad-revision" || e.code == "not-a-repository" => Ok(0),
+        Err(e) => Err(e),
+    }
+}
+
+/// One page from BEYOND the cached window: a direct paged walk. O(skip) per
+/// request, but only paid when a user actually scrolls into old, stable
+/// history (ungit paid it on every refresh).
+pub async fn build_rows_paged(path: &str, offset: u64, limit: u64) -> Result<Vec<Row>, super::errors::GitError> {
+    let (worktree, _gitdir) = resolve_repo_paths(path).map_err(|e| {
+        super::errors::GitError::new("not-a-repository", e, "resolve-repo", "")
+    })?;
+    let args = vec![
+        "log".into(),
+        "--all".into(),
+        "--date-order".into(),
+        format!("--format={}", LOG_FORMAT),
+        "--no-color".into(),
+        format!("--skip={}", offset),
+        format!("-n {}", limit),
     ];
     match run_git(&worktree, &args, GitKind::ReadOnly).await {
         Ok(out) => Ok(parse_rows(&out.stdout)),
@@ -156,10 +211,11 @@ mod tests {
         assert!(git(&["commit", "-q", "-m", "first"], &tmp).status.success());
         assert!(git(&["branch", "feature"], &tmp).status.success());
 
-        let rows = build_rows(tmp.to_str().unwrap()).await.unwrap();
+        let (rows, truncated) = build_rows(tmp.to_str().unwrap()).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].subject, "first");
         assert!(rows[0].parents.is_empty());
+        assert!(!truncated, "a one-commit repo is not truncated");
 
         // empty repo → no error, no rows
         let tmp2 = std::env::temp_dir().join(format!("sirgit-logtest2-{}", std::process::id()));
@@ -168,8 +224,9 @@ mod tests {
         assert!(git(&["init", "-q", "-b", "main"], &tmp2).status.success());
         assert!(git(&["config", "user.name", "T"], &tmp2).status.success());
         assert!(git(&["config", "user.email", "t@sirgit.test"], &tmp2).status.success());
-        let rows2 = build_rows(tmp2.to_str().unwrap()).await.unwrap();
+        let (rows2, truncated2) = build_rows(tmp2.to_str().unwrap()).await.unwrap();
         assert!(rows2.is_empty());
+        assert!(!truncated2);
 
         let _ = std::fs::remove_dir_all(&tmp);
         let _ = std::fs::remove_dir_all(&tmp2);
