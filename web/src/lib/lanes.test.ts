@@ -111,6 +111,38 @@ describe('assignLanes (branch chains)', () => {
     expect(lanes.get('c1')).toBe(0) // k=12 → −6 (outermost left)
   })
 
+  it('reuses released lanes — a branch forked at the trunk tip hugs the trunk', () => {
+    // a long-running branch forked DEEP (at t1) and a short branch forked AT
+    // the trunk tip: the short one lives only near the tip, so the long one's
+    // lane (still alive up top) takes the outer slot and the short one hugs.
+    // Interval = [tip .. join]; lanes release once a chain joins the trunk.
+    const ordered = [
+      row('a3', 'a2'), // long branch tip (newest in display order)
+      row('b1', 't3'), // forked AT the trunk tip, old-dated single commit
+      row('t3', 't2'), // HEAD
+      row('t2', 't1'),
+      row('a2', 'a1'),
+      row('a1', 't1'), // long branch forked deep
+      row('t1', 't0'),
+      row('t0'),
+    ]
+    const tips = [
+      { sha: 't3', current: true },
+      { sha: 'a3', current: false },
+      { sha: 'b1', current: false },
+    ]
+    const { lanes, laneCount } = assignLanes(ordered, tips, 't3')
+    // the long branch (alive at the tip rows) takes slot 1 (right side)
+    expect(lanes.get('a3')).toBe(2)
+    expect(lanes.get('a2')).toBe(2)
+    expect(lanes.get('a1')).toBe(2)
+    // the short recent-fork branch takes the released slot 2 (left side)
+    expect(lanes.get('b1')).toBe(0)
+    expect(lanes.get('t3')).toBe(1)
+    expect(lanes.get('t1')).toBe(1)
+    expect(laneCount).toBe(3)
+  })
+
   it('falls back to topology-only lanes without tips', () => {
     // merge commit m(x, y): extra parent opens its own lane, r consolidates
     const ordered = [row('m', 'x', 'y'), row('x', 'r'), row('y', 'r'), row('r')]

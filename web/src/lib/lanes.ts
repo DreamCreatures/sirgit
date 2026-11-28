@@ -144,6 +144,8 @@ function assignLanesChains(
   interface Chain {
     rows: CommitRow[]
     trunk: boolean
+    /** side-lane index from the release pool (0-based) — trunk chains don't have one */
+    sideLane?: number
   }
   const chains: Chain[] = []
 
@@ -153,19 +155,46 @@ function assignLanesChains(
     chains.push({ rows: walk(trunkTip.sha), trunk: true })
   }
 
-  // side branches: newest tip first → closest column to the trunk
-  const sideTips = tips
-    .filter((t) => rowBySha.has(t.sha) && !claimed.has(t.sha))
-    .sort((a, b) => (idxBySha.get(a.sha) ?? 0) - (idxBySha.get(b.sha) ?? 0))
+  // SIDE CHAINS — lanes with RELEASE (learned from ungit's scrolling: deep
+  // history always hugs the trunk). A chain occupies its lane only from its
+  // tip row down to the row where it JOINS the claimed graph (its fork), then
+  // the lane is free for the next chain. The band width becomes the number of
+  // SIMULTANEOUSLY-alive chains instead of the total number of chains —
+  // merge-heavy repos (ungit: ~470 merged-PR subtrees) fan out only where the
+  // branches actually coexist, and deep rows read as trunk + close siblings.
+  // Greedy over intervals sorted by tip row is optimal for interval graphs.
+  // NOTE the interval INCLUDES the join row: lines overlap even where their
+  // commits don't, so branches forked near the trunk tip still fan out
+  // (ungit's dependabot pile) instead of stacking into one column.
+  interface SideChain {
+    rows: CommitRow[]
+    tipIdx: number
+    joinIdx: number
+  }
+  const side: SideChain[] = []
+  const sideTips = tips.filter((t) => rowBySha.has(t.sha) && !claimed.has(t.sha))
   for (const t of sideTips) {
     const rows = walk(t.sha)
-    if (rows.length > 0) chains.push({ rows, trunk: false })
+    if (rows.length === 0) continue
+    const last = rows[rows.length - 1]
+    side.push({
+      rows,
+      tipIdx: idxBySha.get(t.sha) ?? 0,
+      joinIdx: idxBySha.get(last.parents[0]) ?? (idxBySha.get(last.sha) ?? 0),
+    })
   }
 
   // detached HEAD not covered by any branch tip
   if (headSha && !claimed.has(headSha) && rowBySha.has(headSha)) {
     const rows = walk(headSha)
-    if (rows.length > 0) chains.push({ rows, trunk: false })
+    if (rows.length > 0) {
+      const last = rows[rows.length - 1]
+      side.push({
+        rows,
+        tipIdx: idxBySha.get(headSha) ?? 0,
+        joinIdx: idxBySha.get(last.parents[0]) ?? (idxBySha.get(last.sha) ?? 0),
+      })
+    }
   }
 
   // anything unreachable from a branch tip (merged + deleted branches):
@@ -173,34 +202,49 @@ function assignLanesChains(
   for (const row of ordered) {
     if (!claimed.has(row.sha)) {
       const rows = walk(row.sha)
-      if (rows.length > 0) chains.push({ rows, trunk: false })
+      if (rows.length > 0) {
+        const last = rows[rows.length - 1]
+        side.push({
+          rows,
+          tipIdx: idxBySha.get(row.sha) ?? 0,
+          joinIdx: idxBySha.get(last.parents[0]) ?? (idxBySha.get(last.sha) ?? 0),
+        })
+      }
     }
+  }
+  side.sort((a, b) => a.tipIdx - b.tipIdx || a.joinIdx - b.joinIdx)
+  // lane pool: the join row of each lane's last occupant; a chain starting at
+  // tipIdx may reuse any lane whose occupant joined strictly above it
+  const laneJoins: number[] = []
+  for (const c of side) {
+    let lane = laneJoins.findIndex((join) => join < c.tipIdx)
+    if (lane === -1) lane = laneJoins.length
+    laneJoins[lane] = c.joinIdx
+    chains.push({ rows: c.rows, trunk: false, sideLane: lane })
   }
 
   if (mode === 'left') {
-    // classic layout: trunk owns lane 0, side chains stack to the right
-    // ordered by tip recency (newest tip = closest branch column)
-    let lane = 1
+    // classic layout: trunk owns lane 0, side chains stack to the right in
+    // release-pool order (a released lane is reused by the next chain)
+    let maxLane = 0
     for (const chain of chains) {
-      const l = chain.trunk ? 0 : lane
+      const l = chain.trunk ? 0 : (chain.sideLane ?? 0) + 1
+      maxLane = Math.max(maxLane, l)
       for (const r of chain.rows) lanes.set(r.sha, l)
-      if (!chain.trunk) lane++
     }
-    return { lanes, laneCount: Math.max(1, lane) }
+    return { lanes, laneCount: Math.max(1, maxLane + 1) }
   }
 
   // tree layout: trunk = offset 0; side chains ALTERNATE around it with
-  // UNIFORM single-lane spacing (1st → +1, 2nd → −1, 3rd → +2, …). The old
-  // scheme double-spaced the fan near the trunk and single-spaced the rest —
-  // sibling gaps differed (m > n in the user's diagram), which read as
-  // broken and wasted width. Offsets normalize to plain 0..laneCount−1
-  // slots — consumers never see a negative lane; the view centers the
-  // TRUNK, not the band, and horizontal scroll reaches the outer lanes.
-  let sideIndex = 0
+  // UNIFORM single-lane spacing (lane 1 → +1, 2 → −1, 3 → +2, …). Lane
+  // numbers come from the release pool, so the alternating band only spans
+  // the simultaneously-alive chains. Offsets normalize to plain
+  // 0..laneCount−1 slots — consumers never see a negative lane; the view
+  // centers the TRUNK, not the band, and horizontal scroll reaches the rest.
   const offsets = chains.map((chain) => {
     if (chain.trunk) return 0
-    sideIndex++
-    return sideIndex % 2 === 1 ? (sideIndex + 1) / 2 : -(sideIndex / 2)
+    const s = (chain.sideLane ?? 0) + 1
+    return s % 2 === 1 ? (s + 1) / 2 : -(s / 2)
   })
   let min = 0
   let max = 0
