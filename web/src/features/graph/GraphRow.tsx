@@ -145,8 +145,13 @@ function GraphRowInner({
   const tags = chips.filter((rf) => rf.type === 'tag')
   const ordered: typeof chips = []
   const paired = new Set<string>()
-  for (const rf of chips) {
-    if (rf.type !== 'branch') continue
+  // the checked-out branch LEADS the chip line (HEAD priority — DOM order is
+  // nearest-the-node on both mirror sides), the rest keep ref order
+  const branchChips = chips.filter((rf) => rf.type === 'branch')
+  if (currentBranch) {
+    branchChips.sort((a, b) => Number(b.name === currentBranch) - Number(a.name === currentBranch))
+  }
+  for (const rf of branchChips) {
     ordered.push(rf)
     paired.add(rf.name)
     // pair any <remote>/<name> twin, not just origin's — repos with other
