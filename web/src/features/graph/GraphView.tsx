@@ -8,7 +8,7 @@ import { useUiStore } from '../../state/uiStore'
 import GraphRow from './GraphRow'
 import GraphEdges, { laneColor } from './GraphEdges'
 
-export const ROW_H = 44
+export const ROW_H = 50
 /** extra room in the reserved top slot — the initial ghost→HEAD distance */
 const GHOST_PAD = 20
 // lane spacing: wide enough that a sibling lane's curve reaches the big HEAD
