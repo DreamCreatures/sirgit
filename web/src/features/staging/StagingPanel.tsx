@@ -156,6 +156,14 @@ export default function StagingPanel({
       setAmend(false)
       toast({ kind: 'success', title: amend ? 'Commit amended' : 'Commit created' })
       invalidate()
+      // the new node's TRUE position needs the remote refs — fetch in the
+      // background right after committing so the graph shows the fork against
+      // origin/<branch> without a manual refresh. Fire-and-forget: never
+      // blocks the commit, never toasts, and because nothing polls the op an
+      // un-stored-credentials remote just times out quietly instead of
+      // opening the credentials modal; on success the WS refs bump re-renders
+      // the graph (with the lane animation).
+      void api.fetch(path).catch(() => {})
     },
     onError: (e: unknown) => {
       const { title: t, detail } = friendlyError(e)

@@ -863,6 +863,7 @@ export default function RepoPage() {
                   rowRefs={refBySha.get(sha) ?? []}
                   selectedRef={selectedRef}
                   remoteBranchNames={refs?.remoteBranches.map((r) => r.name) ?? []}
+                  getRemoteTipSha={(name) => refs?.remoteBranches.find((r) => r.name === name)?.sha}
                   localBranchNames={refs?.branches.map((b) => b.name) ?? []}
                   onCheckout={guardedCheckout}
                   onCheckoutRemote={checkoutRemoteRef}

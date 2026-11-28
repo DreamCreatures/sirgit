@@ -18,6 +18,8 @@ export interface SelectionActionsProps {
   rowRefs: RefInfo[]
   selectedRef: SelectedRef | null
   remoteBranchNames: string[]
+  /** resolve a remote ref (origin/x) to its tip sha — drives the diverged-push rebase offer */
+  getRemoteTipSha?: (remoteRef: string) => string | undefined
   /** local branch names — a remote checkout whose local exists is a plain checkout */
   localBranchNames: string[]
   /** guarded checkout (RepoPage): a dirty worktree asks bring/stash first */
@@ -35,6 +37,7 @@ export function SelectionActions({
   rowRefs,
   selectedRef,
   remoteBranchNames,
+  getRemoteTipSha,
   localBranchNames,
   onCheckout,
   onCheckoutRemote,
@@ -125,14 +128,54 @@ export function SelectionActions({
         })
         .catch((e: unknown) => {
           if (e instanceof GitRequestError && e.code === 'non-fast-forward' && !refspec.includes('refs/tags/')) {
+            // The remote branch has commits this branch does not. When the
+            // pushed branch IS the checked-out one, the safe reconcile is a
+            // rebase onto the remote tip (= pull --rebase): local commits
+            // replay on top, nothing published is lost, and the retry push is
+            // a plain fast-forward — that is the PRIMARY action. Force push
+            // stays one deliberate click away (--force-with-lease). A
+            // non-checked-out branch cannot rebase (rebase works on HEAD) —
+            // force-only there, as before.
+            const remoteRef = `${remote}/${refspec}`
+            const remoteTipSha = getRemoteTipSha?.(remoteRef)
+            const rebasable = refspec === currentBranch && !!remoteTipSha
+            const rebaseThenPush = (): Promise<unknown> => {
+              useUiStore.getState().beginOp('Rebase')
+              useUiStore.getState().setNetBusy('Rebase')
+              return api
+                .rebaseStart(path, remoteTipSha!)
+                .then(() => attempt(false))
+                .catch((err: unknown) => {
+                  // a SECOND rejection (the remote moved again mid-reconcile)
+                  // has already re-opened this dialog from attempt's catch —
+                  // swallow it here so no stale error toast lands on top
+                  if (err instanceof GitRequestError && err.code === 'non-fast-forward') return
+                  const { title: t, detail: d } = friendlyError(err)
+                  if (/conflict/i.test(`${t} ${d ?? ''}`)) {
+                    toast({ kind: 'info', title: 'Rebase paused — resolve conflicts in the staging area, then Push again' })
+                  } else {
+                    toast({ kind: 'error', title: t, detail: d })
+                  }
+                })
+                .finally(() => {
+                  useUiStore.getState().setNetBusy(null)
+                  useUiStore.getState().endOp()
+                })
+            }
             useUiStore.getState().setDialog({
               kind: 'confirm',
-              danger: true,
+              danger: !rebasable,
               title: 'Push rejected — remote has diverged',
               message:
-                'The remote branch has commits this branch does not.\n\nForce push overwrites the remote with your branch. It uses --force-with-lease, which refuses if the remote moved since the last fetch.',
-              confirmLabel: 'Force push',
-              onConfirm: () => attempt(true),
+                `The remote branch has commits this branch does not.` +
+                (rebasable
+                  ? '\n\nRebase replays your commits on top of the remote tip — nothing published is lost — and the push then fast-forwards.'
+                  : '') +
+                '\n\nForce push overwrites the remote with your branch. It uses --force-with-lease, which refuses if the remote moved since the last fetch.',
+              confirmLabel: rebasable ? `Rebase onto ${remoteRef} & push` : 'Force push',
+              onConfirm: rebasable ? rebaseThenPush : () => attempt(true),
+              altLabel: rebasable ? 'Force push' : undefined,
+              onAlt: rebasable ? () => attempt(true) : undefined,
             })
           } else {
             const { title, detail } = friendlyError(e)
