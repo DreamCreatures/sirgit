@@ -243,6 +243,20 @@ pub async fn worktree_file_diff(path: &str, file: &str, staged: bool) -> Result<
     let (worktree, _) = resolve_repo_paths(path).map_err(|e| {
         super::errors::GitError::new("not-a-repository", e, "resolve-repo", "")
     })?;
+    // UNMERGED paths: `git diff [--cached] -- <file>` emits the COMBINED
+    // `diff --cc` form (or nothing), which the UI's parser cannot read — the
+    // conflicted file's diff rendered as "No textual changes (binary or
+    // identical)". `git diff HEAD -- <file>` shows the conflict markers in
+    // the ordinary two-way form instead.
+    if is_unmerged(&worktree, file).await {
+        let out = run_git(
+            &worktree,
+            &["diff".to_string(), "HEAD".to_string(), "--".to_string(), file.to_string()],
+            GitKind::ReadOnly,
+        )
+        .await?;
+        return Ok(out.stdout);
+    }
     let mut args = vec!["diff".to_string(), "--no-color".to_string()];
     if staged {
         args.push("--cached".into());
@@ -283,6 +297,24 @@ async fn is_untracked(worktree: &Path, file: &str) -> bool {
             "ls-files".into(),
             "--others".into(),
             "--exclude-standard".into(),
+            "-z".into(),
+            "--".into(),
+            file.to_string(),
+        ],
+        GitKind::ReadOnly,
+    )
+    .await
+    .map(|o| !o.stdout.trim_matches('\0').is_empty())
+    .unwrap_or(false)
+}
+
+/// `git ls-files -u` lists the path iff it has unmerged index stages.
+async fn is_unmerged(worktree: &Path, file: &str) -> bool {
+    run_git(
+        worktree,
+        &[
+            "ls-files".into(),
+            "-u".into(),
             "-z".into(),
             "--".into(),
             file.to_string(),

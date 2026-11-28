@@ -39,15 +39,74 @@ pub async fn discard(repo: &str, files: &[String], untracked: &[String]) -> Resu
             }
         }
     }
-    if files.len() > untracked.len() || (!files.is_empty() && untracked.is_empty()) {
-        let tracked: Vec<String> = files.iter().filter(|f| !untracked.contains(f)).cloned().collect();
-        if !tracked.is_empty() {
-            let mut args = vec!["checkout".to_string(), "HEAD".to_string(), "--".to_string()];
-            args.extend(tracked);
-            run_git(&w, &args, GitKind::Mutation).await.map(|_| ())?;
+    let tracked: Vec<String> = files.iter().filter(|f| !untracked.contains(f)).cloned().collect();
+    if tracked.is_empty() {
+        return Ok(());
+    }
+    // tracked-in-HEAD files restore in one spawn. A file that is NOT in HEAD
+    // (a brand-new file the default-staged workflow staged within 400 ms)
+    // makes the whole batch fail with "pathspec did not match" — fall back to
+    // per-file: restore what HEAD knows, and `rm -f` the new ones out of the
+    // index AND the worktree (discard of a new file means "make it go away").
+    let mut args = vec!["checkout".to_string(), "HEAD".to_string(), "--".to_string()];
+    args.extend(tracked.iter().cloned());
+    if run_git(&w, &args, GitKind::Mutation).await.is_ok() {
+        return Ok(());
+    }
+    for f in &tracked {
+        let restore = vec!["checkout".to_string(), "HEAD".to_string(), "--".to_string(), f.clone()];
+        if run_git(&w, &restore, GitKind::Mutation).await.is_err() {
+            let rm = vec!["rm".to_string(), "-f".to_string(), "--".to_string(), f.clone()];
+            run_git(&w, &rm, GitKind::Mutation).await?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod discard_tests {
+    use super::*;
+
+    fn git(dir: &Path, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .env("LC_ALL", "C")
+            .output()
+            .unwrap()
+    }
+
+    /// Discarding a STAGED NEW file (absent from HEAD) used to fail the whole
+    /// batch with "pathspec did not match" — the file must leave index and
+    /// worktree, and known files must still restore in the same call.
+    #[tokio::test]
+    async fn discard_handles_staged_new_files() {
+        let tmp = std::env::temp_dir().join(format!("sirgit-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        assert!(git(&tmp, &["init", "-q", "-b", "main"]).status.success());
+        assert!(git(&tmp, &["config", "user.name", "T"]).status.success());
+        assert!(git(&tmp, &["config", "user.email", "t@sirgit.test"]).status.success());
+        std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
+        assert!(git(&tmp, &["add", "."]).status.success());
+        assert!(git(&tmp, &["commit", "-q", "-m", "c1"]).status.success());
+
+        std::fs::write(tmp.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(tmp.join("new.txt"), "fresh\n").unwrap();
+        assert!(git(&tmp, &["add", "."]).status.success());
+        assert!(git(&tmp, &["status", "--porcelain"]).stdout.starts_with(b"M  "));
+
+        discard(tmp.to_str().unwrap(), &["a.txt".into(), "new.txt".into()], &[]).await.unwrap();
+        assert_eq!(std::fs::read_to_string(tmp.join("a.txt")).unwrap(), "one\n", "tracked file restored");
+        assert!(!tmp.join("new.txt").exists(), "staged new file deleted");
+        let left = String::from_utf8_lossy(&git(&tmp, &["status", "--porcelain"]).stdout).into_owned();
+        assert!(left.trim().is_empty(), "worktree clean again, got {left:?}");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
 
 pub async fn commit(
@@ -131,16 +190,22 @@ async fn do_checkout(
     match remote {
         None => run_git(w, &["checkout".into(), ref_name.to_string()], GitKind::Mutation).await.map(|_| ()),
         Some(remote) => {
-            // remote branch → create local tracking branch
-            let local = ref_name
-                .strip_prefix(&format!("{}/", remote))
-                .unwrap_or(ref_name);
+            // `remote` arrives as either a remote NAME ("origin" — the
+            // sidebar's create-tracking checkout) or a FULL remote-tracking
+            // ref ("origin/x" — older graph-path callers). A '/' means the
+            // tracking ref itself was passed and ref_name is already the
+            // local branch name; composing "{remote}/{local}" from THAT gave
+            // `git checkout -b x --track origin/x/x` and always failed.
+            let (track_ref, local) = match remote.split_once('/') {
+                Some(_) => (remote.to_string(), ref_name.to_string()),
+                None => (format!("{}/{}", remote, ref_name), ref_name.to_string()),
+            };
             let args = vec![
                 "checkout".into(),
                 "-b".into(),
-                local.to_string(),
+                local,
                 "--track".into(),
-                format!("{}/{}", remote, local),
+                track_ref,
             ];
             run_git(w, &args, GitKind::Mutation).await.map(|_| ())
         }
@@ -196,10 +261,46 @@ pub async fn rename_branch(repo: &str, old: &str, new: &str) -> Result<(), super
     run_git(&w, &["branch".to_string(), "-m".to_string(), old.to_string(), new.to_string()], GitKind::Mutation).await.map(|_| ())
 }
 
-/// Rename a tag the same way (create at old's sha, delete old).
+/// Rename a tag (create at old's target, delete old). An ANNOTATED tag keeps
+/// its annotation: a plain `git tag <new> <old>` would create a LIGHTWEIGHT
+/// tag pointing at the tag object — message and tagger gone. The old tag
+/// object's message is re-fed through `tag -a -F -`, mirroring move_tag.
 pub async fn rename_tag(repo: &str, old: &str, new: &str) -> Result<(), super::errors::GitError> {
     let w = repo_or_err(repo)?;
-    run_git(&w, &["tag".to_string(), new.to_string(), old.to_string()], GitKind::Mutation).await.map(|_| ())?;
+    let kind = run_git(
+        &w,
+        &["cat-file".to_string(), "-t".to_string(), format!("refs/tags/{}", old)],
+        GitKind::ReadOnly,
+    )
+    .await?;
+    if kind.stdout.trim() == "tag" {
+        let msg = run_git(
+            &w,
+            &[
+                "for-each-ref".to_string(),
+                "--format=%(contents)".to_string(),
+                format!("refs/tags/{}", old),
+            ],
+            GitKind::ReadOnly,
+        )
+        .await?;
+        run_git_with_stdin(
+            &w,
+            &[
+                "tag".to_string(),
+                "-a".to_string(),
+                new.to_string(),
+                "-F".to_string(),
+                "-".to_string(),
+                old.to_string(),
+            ],
+            msg.stdout.as_str(),
+            GitKind::Mutation,
+        )
+        .await?;
+    } else {
+        run_git(&w, &["tag".to_string(), new.to_string(), old.to_string()], GitKind::Mutation).await?;
+    }
     run_git(&w, &["tag".to_string(), "-d".to_string(), old.to_string()], GitKind::Mutation).await.map(|_| ())
 }
 
@@ -356,7 +457,17 @@ pub async fn merge_branch(
             };
             Ok(Some(message))
         } else {
-            run_git(&w, &["merge".to_string(), from.to_string()], GitKind::Mutation).await.map(|_| None)
+            // --autostash: the default-staged workflow keeps changes staged
+            // almost always — a plain rebase refuses ("You have unstaged
+            // changes"), which used to surface as a bogus "rebase already in
+            // progress". Autostash tucks them away and restores them after.
+            run_git(
+                &w,
+                &["merge".into(), "--autostash".into(), from.to_string()],
+                GitKind::Mutation,
+            )
+            .await
+            .map(|_| None)
         }
     } else {
         if squash {
@@ -476,6 +587,15 @@ pub async fn merge_continue(repo: &str, message: Option<&str>) -> Result<(), sup
 
 pub async fn merge_abort(repo: &str) -> Result<(), super::errors::GitError> {
     let w = repo_or_err(repo)?;
+    // `merge --abort` needs MERGE_HEAD — a CONFLICTED `merge --squash` has
+    // only SQUASH_MSG (its changes sit staged, no merge to abort). The abort
+    // there is `reset --hard`: the partially-staged squash is discarded and
+    // branch + worktree return to HEAD. The client confirms before calling.
+    let has_merge_head = w.join(".git").join("MERGE_HEAD").exists();
+    let has_squash_msg = w.join(".git").join("SQUASH_MSG").exists();
+    if !has_merge_head && has_squash_msg {
+        return run_git(&w, &["reset".into(), "--hard".into(), "HEAD".into()], GitKind::Mutation).await.map(|_| ());
+    }
     run_git(&w, &["merge".into(), "--abort".into()], GitKind::Mutation).await.map(|_| ())
 }
 
@@ -493,16 +613,39 @@ pub async fn rebase_abort(repo: &str) -> Result<(), super::errors::GitError> {
 
 /// Rebase the current branch onto `onto` (branch name or sha). Conflicts
 /// pause the rebase — the staging area then offers continue/abort.
+/// --autostash: the default-staged workflow keeps changes staged nearly
+/// always; a bare rebase refuses with "You have unstaged changes", which the
+/// old classifier mislabeled as "a rebase is already in progress".
 pub async fn rebase_start(repo: &str, onto: &str) -> Result<(), super::errors::GitError> {
     let w = repo_or_err(repo)?;
-    run_git(&w, &["rebase".into(), onto.to_string()], GitKind::Mutation).await.map(|_| ())
+    run_git(
+        &w,
+        &["rebase".into(), "--autostash".into(), onto.to_string()],
+        GitKind::Mutation,
+    )
+    .await
+    .map(|_| ())
 }
 
 /// Cherry-pick a commit onto HEAD. Conflicts pause the pick — the staging
-/// area offers continue/abort like merge/revert.
+/// area offers continue/abort like merge/revert/rebase.
 pub async fn cherry_pick(repo: &str, sha: &str) -> Result<(), super::errors::GitError> {
     let w = repo_or_err(repo)?;
     run_git(&w, &["cherry-pick".into(), sha.to_string()], GitKind::Mutation).await.map(|_| ())
+}
+
+pub async fn cherry_pick_continue(repo: &str) -> Result<(), super::errors::GitError> {
+    let w = repo_or_err(repo)?;
+    run_git(&w, &["cherry-pick".into(), "--continue".into()], GitKind::Mutation)
+        .await
+        .map(|_| ())
+}
+
+pub async fn cherry_pick_abort(repo: &str) -> Result<(), super::errors::GitError> {
+    let w = repo_or_err(repo)?;
+    run_git(&w, &["cherry-pick".into(), "--abort".into()], GitKind::Mutation)
+        .await
+        .map(|_| ())
 }
 
 /// Revert a commit: a new commit undoing its changes (`git revert --no-edit`).
@@ -572,13 +715,17 @@ pub async fn fetch(
 }
 
 /// Push. refspec is e.g. "main" or "main:main" or "refs/tags/v1:refs/tags/v1".
-pub async fn push(repo: &str, remote: &str, refspec: &str, force: bool, extra: &[String]) -> Result<(), super::errors::GitError> {
+pub async fn push(repo: &str, remote: &str, refspec: &str, force: bool, set_upstream: bool, extra: &[String]) -> Result<(), super::errors::GitError> {
     let w = repo_or_err(repo)?;
     let mut args: Vec<String> = extra.to_vec();
     args.push("push".into());
     if force {
         // lease: refuses if the remote moved since the last fetch — safer than --force
         args.push("--force-with-lease".into());
+    }
+    // first push of a branch: -u records the upstream so Pull/behind-↑N work
+    if set_upstream && !refspec.starts_with("refs/tags/") && !refspec.starts_with(':') && !refspec.contains(':') {
+        args.push("-u".into());
     }
     args.push(remote.to_string());
     args.push(refspec.to_string());
@@ -740,6 +887,9 @@ pub async fn pull(repo: &str, branch: Option<&str>, extra: &[String]) -> Result<
     if branch == current {
         let mut fargs: Vec<String> = extra.to_vec();
         fargs.push("fetch".to_string());
+        // prune: branches deleted on the remote must drop out of the
+        // remote-tracking refs on pull too, not only on Fetch
+        fargs.push("--prune".to_string());
         fargs.push(remote.clone());
         run_git(&w, &fargs, GitKind::Network).await?;
 

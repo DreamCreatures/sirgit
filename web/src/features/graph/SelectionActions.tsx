@@ -102,14 +102,19 @@ export function SelectionActions({
   }
 
 
-  /** Push with busy state, error toasts, and a force-push offer on non-fast-forward. */
-  const runPush = (remote: string, refspec: string) => {
+  /** Push with busy state, error toasts, and a force-push offer on non-fast-forward.
+   *  The remote follows the branch's UPSTREAM when it has one (not "first
+   *  remote alphabetically"); a branch with no upstream is pushed with -u so
+   *  Pull and the ahead/behind chips start working right away. */
+  const runPush = (refspec: string, opts?: { setUpstream?: boolean; remote?: string }) => {
+    const remote =
+      opts?.remote ?? selBranch?.upstream?.split('/')[0] ?? remoteBranchNames[0]?.split('/')[0] ?? 'origin'
     // returns the settled promise so dialog onConfirms keep their spinner up
     const attempt = (force: boolean) => {
       useUiStore.getState().beginOp('Push')
       useUiStore.getState().setNetBusy('Push')
       setPushing(true)
-      return pollOpAfter(api.push(path, remote, refspec, force))
+      return pollOpAfter(api.push(path, remote, refspec, force, opts?.setUpstream ?? false))
     }
     const pollOpAfter = (started: Promise<{ opId: string }>) =>
       started
@@ -259,9 +264,13 @@ export function SelectionActions({
           {!inSync && (
             <button
               className={`${btn} bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 disabled:opacity-50`}
-              title={`Push ${selBranch.name} to ${remoteBranchNames[0]?.split('/')[0] ?? 'origin'}`}
+              title={
+                selBranch.upstream
+                  ? `Push ${selBranch.name} to ${selBranch.upstream}`
+                  : `Push ${selBranch.name} to ${remoteBranchNames[0]?.split('/')[0] ?? 'origin'} and set upstream (push -u)`
+              }
               disabled={pushing}
-              onClick={() => runPush(remoteBranchNames[0]?.split('/')[0] ?? 'origin', selBranch.name)}
+              onClick={() => runPush(selBranch.name, { setUpstream: !selBranch.upstream })}
             >
               {pushing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Push
             </button>
@@ -387,7 +396,7 @@ export function SelectionActions({
                   'Local branches (tracking or not) are untouched; commits unique to the remote branch become unreachable there. The remote refuses if this is its default branch.',
                 confirmLabel: 'Delete',
                 // returns the runPush promise → the dialog spins until the push settles
-                onConfirm: () => runPush(remote, `:refs/heads/${local}`),
+                onConfirm: () => runPush(`:refs/heads/${local}`, { remote }),
               })
             }}
           >
@@ -405,7 +414,9 @@ export function SelectionActions({
             title={`Push tag ${selTag.name}`}
             disabled={pushing}
             onClick={() =>
-              runPush(remoteBranchNames[0]?.split('/')[0] ?? 'origin', `refs/tags/${selTag.name}:refs/tags/${selTag.name}`)
+              runPush(`refs/tags/${selTag.name}:refs/tags/${selTag.name}`, {
+                remote: remoteBranchNames[0]?.split('/')[0] ?? 'origin',
+              })
             }
           >
             {pushing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Push tag

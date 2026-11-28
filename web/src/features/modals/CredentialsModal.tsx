@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Lock } from 'lucide-react'
 import { api } from '../../lib/client'
 import { useUiStore } from '../../state/uiStore'
@@ -9,6 +9,19 @@ export default function CredentialsModal() {
   const setReq = useUiStore((s) => s.setCredentialsRequest)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const userRef = useRef<HTMLInputElement>(null)
+
+  // Esc cancels the pending request (the helper gets nothing and git fails
+  // over to its own error path) — the modal previously had no Esc exit
+  useEffect(() => {
+    if (!req) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancel()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancel is stable per req
+  }, [req])
 
   if (!req) return null
 
@@ -26,10 +39,17 @@ export default function CredentialsModal() {
   const cancel = () => {
     void api.credentialsCancel(req.opId).catch(() => undefined)
     setReq(null)
+    setUsername('')
+    setPassword('')
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Remote credentials required"
+    >
       <div className="w-96 rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl">
         <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-100">
           <Lock className="h-4 w-4 text-emerald-400" /> Remote credentials required
@@ -39,8 +59,10 @@ export default function CredentialsModal() {
         </p>
         <div className="mt-4 flex flex-col gap-2">
           <input
+            ref={userRef}
             className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-600"
             placeholder="username"
+            aria-label="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoFocus
@@ -48,6 +70,7 @@ export default function CredentialsModal() {
           <input
             className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-600"
             placeholder="password / token"
+            aria-label="Password or token"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

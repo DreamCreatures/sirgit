@@ -27,6 +27,17 @@ pub async fn get_credentials(
             .unwrap();
     };
 
+    // credentials answered for this remote earlier in the session → serve them
+    // immediately, no UI round-trip (the helper GET is still the delivery path)
+    if let Some((u, p)) = app.creds.stored_for(&pending.remote) {
+        let body = format!("username={}\npassword={}\n", u, p);
+        return axum::response::Response::builder()
+            .status(200)
+            .header("content-type", "text/plain")
+            .body(axum::body::Body::from(body))
+            .unwrap();
+    }
+
     // notify the repo room's WS subscribers so the credentials modal appears
     let path = match app.get_op(&q.op) {
         Some(op) => op.lock().await.path.clone(),

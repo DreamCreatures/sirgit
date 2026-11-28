@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router'
 import type { CommitRow, RefInfo } from '../../lib/types'
 import type { SelectedRef } from '../../state/uiStore'
 import { useGraphStore } from '../../state/graphStore'
@@ -84,6 +85,8 @@ export default function GraphView({
   const loadOlder = useGraphStore((s) => s.loadOlder)
   const fetchingOlder = useGraphStore((s) => s.fetchingOlder)
   const exhausted = useGraphStore((s) => s.exhausted)
+  const loadError = useGraphStore((s) => s.loadError)
+  const revision = useGraphStore((s) => s.revision)
   const selectedSha = useUiStore((s) => s.selectedSha)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -167,9 +170,9 @@ export default function GraphView({
   // tree layout centers the TRUNK itself (the checked-out branch's column),
   // not the whole lane band: merge-heavy repos accumulate hundreds of
   // right-stacked chains beyond the alternating fan, and centering that band
-  // would push the trunk off-screen. Trunk at viewport middle = HEAD where
-  // the eye rests, fan around it, overflow clipped right. 'left' mode never
-  // centers.
+  // would push the trunk off-screen. Trunk at CONTENT middle = HEAD where the
+  // eye rests; when the band is wider than the viewport the container scrolls
+  // horizontally and the outer lanes stay reachable. 'left' mode never centers.
   const laneMode = useGraphStore((s) => s.laneMode)
   const headIdx = headSha ? ordered.findIndex((r) => r.sha === headSha) : -1
   const headLane = headIdx >= 0 && headSha ? (laneLayout.lanes.get(headSha) ?? -1) : -1
@@ -179,10 +182,30 @@ export default function GraphView({
   // negative x and clips ("...6"). 64px of padding buys ~100px of tag room;
   // tree mode centers the trunk, so its corridors already have space.
   const LEFT_TAG_PAD = 64
+  // content width: at least the viewport (no scrollbar), but wide enough for
+  // the whole lane band when it overflows — overflow-x-auto then scrolls
+  const bandW = laneX(laneLayout.laneCount) + 20
+  const contentW =
+    laneMode === 'tree'
+      ? Math.max(viewportW, bandW + LEFT_TAG_PAD)
+      : Math.max(viewportW, LEFT_TAG_PAD + bandW)
   const originX =
     laneMode === 'tree' && trunkLane != null
-      ? Math.max(0, Math.floor(viewportW / 2) - laneX(trunkLane))
+      ? Math.max(0, Math.floor(contentW / 2) - laneX(trunkLane))
       : LEFT_TAG_PAD
+  // center the trunk horizontally once per repo open (and after a mode
+  // switch); afterwards the user owns the horizontal scroll position
+  const centeredRef = useRef('')
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const key = `${laneMode}:${contentW > viewportW}`
+    if (centeredRef.current === key) return
+    centeredRef.current = key
+    if (contentW > viewportW) {
+      el.scrollLeft = Math.max(0, Math.floor((contentW - viewportW) / 2))
+    }
+  }, [laneMode, contentW, viewportW])
   const showTether = headIdx >= 0 && headLane >= 0 && !ghostSha
   const headCenterY = rowTop(headIdx) + ROW_H / 2
   const tetherCx = originX + laneX(headLane)
@@ -263,10 +286,10 @@ export default function GraphView({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="scroll-thin relative h-full overflow-y-auto overflow-x-hidden"
+      className="scroll-thin relative h-full overflow-auto"
       data-testid="graph-scroll"
     >
-      <div style={{ height: contentH, position: 'relative' }}>
+      <div style={{ height: contentH, width: contentW, position: 'relative' }}>
         {/* prospective next commit: dashed node above its anchor commit (the
          *  action's target), dashed stem down to it. Row 0 uses the reserved
          *  top slot; deeper anchors overlay the row above — an opaque plate
@@ -326,7 +349,7 @@ export default function GraphView({
                   : 'left'
               }
               msgWithTags={laneMode === 'tree' && trunkLane != null}
-              graphW={viewportW}
+              graphW={contentW}
               refs={refBySha.get(row.sha)}
               remoteTags={remoteTags}
               remoteTagRemote={remoteTagRemote}
@@ -444,10 +467,35 @@ export default function GraphView({
             </span>
           </div>
         )}
-        {totalRows === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-600">
-            no commits (empty repository or unborn branch)
+        {loadError ? (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-zinc-950/85 px-6 text-center">
+            <p className="text-sm text-red-300">Can’t load history — {loadError}</p>
+            <p className="text-xs text-zinc-500">
+              The path may have been moved, deleted, or is not a git repository.
+            </p>
+            <Link
+              to="/"
+              className="mt-1 rounded-md bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700"
+              data-testid="graph-load-error-back"
+            >
+              Back to repositories
+            </Link>
           </div>
+        ) : (
+          totalRows === 0 &&
+          revision !== null &&
+          !fetchingOlder && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-zinc-600">
+              <span>no commits (empty repository or unborn branch)</span>
+              <Link
+                to="/"
+                className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+                data-testid="graph-empty-back"
+              >
+                Back to repositories
+              </Link>
+            </div>
+          )
         )}
       </div>
     </div>

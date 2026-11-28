@@ -248,6 +248,9 @@ pub struct PushParams {
     pub refspec: String,
     #[serde(default)]
     pub force: bool,
+    /// set upstream on the first push of a branch (git push -u)
+    #[serde(default, rename = "setUpstream")]
+    pub set_upstream: bool,
 }
 
 // ---------- simple (write-locked, inline) ops ----------
@@ -486,6 +489,20 @@ pub async fn cherry_pick(State(app): State<Arc<AppState>>, Json(p): Json<RevertP
     Ok(ok_json())
 }
 
+pub async fn cherry_pick_continue(State(app): State<Arc<AppState>>, Json(p): Json<PathOnlyParams>) -> ApiResult<Json<serde_json::Value>> {
+    let (_st, _g) = locked(&app, &p.path).await?;
+    ops::cherry_pick_continue(&p.path).await.map_err(ApiError::Git)?;
+    _st.bump(&["refs", "index", "worktree"]);
+    Ok(ok_json())
+}
+
+pub async fn cherry_pick_abort(State(app): State<Arc<AppState>>, Json(p): Json<PathOnlyParams>) -> ApiResult<Json<serde_json::Value>> {
+    let (_st, _g) = locked(&app, &p.path).await?;
+    ops::cherry_pick_abort(&p.path).await.map_err(ApiError::Git)?;
+    _st.bump(&["refs", "index", "worktree"]);
+    Ok(ok_json())
+}
+
 // ---------- network ops (async, with opId + credentials + progress) ----------
 
 pub async fn fetch(State(app): State<Arc<AppState>>, Json(p): Json<FetchParams>) -> ApiResult<Json<serde_json::Value>> {
@@ -527,9 +544,10 @@ pub async fn push(State(app): State<Arc<AppState>>, Json(p): Json<PushParams>) -
     let path = p.path.clone();
     let refspec = p.refspec.clone();
     let force = p.force;
+    let set_upstream = p.set_upstream;
     let remote = p.remote.clone();
     let op_id = start_network_op(&app, &st, "push", &path.clone(), &remote, move |cred_args, remote| async move {
-        ops::push(&path, &remote, &refspec, force, &cred_args).await
+        ops::push(&path, &remote, &refspec, force, set_upstream, &cred_args).await
     });
     Ok(Json(json!({ "opId": op_id })))
 }

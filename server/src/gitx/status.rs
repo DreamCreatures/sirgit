@@ -37,6 +37,10 @@ pub struct StatusSnapshot {
     pub in_rebase: bool,
     pub in_cherry: bool,
     pub in_revert: bool,
+    /// conflicted `merge --squash`: unmerged entries with NO merge/rebase/
+    /// cherry/revert marker and a SQUASH_MSG on disk — there is no MERGE_HEAD,
+    /// so the old check rendered no banner and Abort had nothing to abort
+    pub in_squash: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -297,6 +301,17 @@ pub async fn read_status(path: &str) -> Result<StatusSnapshot, super::errors::Gi
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
 
+    let in_merge = gitdir_flag(&git_dir, "MERGE_HEAD");
+    let in_rebase = gitdir_flag(&git_dir, "rebase-merge") || gitdir_flag(&git_dir, "rebase-apply");
+    let in_cherry = gitdir_flag(&git_dir, "CHERRY_PICK_HEAD");
+    let in_revert = gitdir_flag(&git_dir, "REVERT_HEAD");
+    let in_squash = !in_merge
+        && !in_rebase
+        && !in_cherry
+        && !in_revert
+        && gitdir_flag(&git_dir, "SQUASH_MSG")
+        && files.iter().any(|f| f.conflict);
+
     Ok(StatusSnapshot {
         head_oid,
         branch,
@@ -304,10 +319,11 @@ pub async fn read_status(path: &str) -> Result<StatusSnapshot, super::errors::Gi
         ahead,
         behind,
         files,
-        in_merge: gitdir_flag(&git_dir, "MERGE_HEAD"),
-        in_rebase: gitdir_flag(&git_dir, "rebase-merge") || gitdir_flag(&git_dir, "rebase-apply"),
-        in_cherry: gitdir_flag(&git_dir, "CHERRY_PICK_HEAD"),
-        in_revert: gitdir_flag(&git_dir, "REVERT_HEAD"),
+        in_merge,
+        in_rebase,
+        in_cherry,
+        in_revert,
+        in_squash,
     })
 }
 

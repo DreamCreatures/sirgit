@@ -14,6 +14,12 @@ import { friendlyError } from '../lib/gitErrors'
  * promise also keeps the dialog open — the error shows inline so the user
  * fixes the input (branch name taken, protected ref) instead of retyping
  * everything after a toast.
+ *
+ * CHAINED dialogs: an onConfirm may open the NEXT dialog (dirty-worktree
+ * checkout asks bring/stash after the remote-branch confirm). Completion of
+ * the first promise therefore closes the dialog ONLY if it is still the
+ * current one — otherwise the follow-up dialog would be killed in the same
+ * tick it appeared.
  */
 export default function AppDialog() {
   const dialog = useUiStore((s) => s.dialog)
@@ -22,17 +28,17 @@ export default function AppDialog() {
   const [pending, setPending] = useState<'confirm' | 'alt' | null>(null)
   const [error, setError] = useState<{ title: string; detail?: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     // a freshly opened dialog never inherits the previous one's leftovers:
     // error (a failed op's inline message), pending spinner, or prompt value
     setError(null)
     setPending(null)
-    if (dialog?.kind === 'prompt') {
-      setValue(dialog.initial)
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }
+    if (dialog?.kind === 'prompt') setValue(dialog.initial)
+    // focus the dialog itself: prompt inputs fall through to the input's
+    // own autoFocus; confirms land here so keyboard users start INSIDE
+    if (dialog) panelRef.current?.focus()
   }, [dialog])
 
   useEffect(() => {
@@ -44,19 +50,37 @@ export default function AppDialog() {
     return () => document.removeEventListener('keydown', onKey)
   }, [dialog, setDialog, pending])
 
+  // focus trap: Tab cycles inside the panel — tabbing away would reach the
+  // app behind a modal overlay that swallows all pointer events
+  const trapTab = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab' || !panelRef.current) return
+    const els = panelRef.current.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    if (els.length === 0) return
+    const first = els[0]
+    const last = els[els.length - 1]
+    const active = document.activeElement as HTMLElement | null
+    if (e.shiftKey && (active === first || !panelRef.current.contains(active))) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && (active === last || !panelRef.current.contains(active))) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+
   if (!dialog) return null
 
   const confirm = () => {
     if (pending) return
-    const close = () => setDialog(null)
+    // Enter on an EMPTY prompt must not close the dialog — the confirm
+    // button is disabled for the same reason; do nothing
+    if (dialog.kind === 'prompt' && !value.trim()) return
     const result =
-      dialog.kind === 'prompt'
-        ? value.trim()
-          ? dialog.onConfirm(value.trim())
-          : undefined
-        : dialog.onConfirm()
+      dialog.kind === 'prompt' ? dialog.onConfirm(value.trim()) : dialog.onConfirm()
     if (result === undefined) {
-      close()
+      setDialog(null)
       return
     }
     // async op: spinner until it settles. Success closes; rejection keeps
@@ -66,7 +90,8 @@ export default function AppDialog() {
     void Promise.resolve(result)
       .then(() => {
         setPending(null)
-        close()
+        // chained-dialog guard: only close when THIS dialog is still current
+        if (useUiStore.getState().dialog === dialog) setDialog(null)
       })
       .catch((e: unknown) => {
         setPending(null)
@@ -80,10 +105,9 @@ export default function AppDialog() {
   // confirm — its own spinner, errors inline, Esc/backdrop locked while running
   const alt = () => {
     if (pending || dialog.kind !== 'confirm' || !dialog.onAlt) return
-    const close = () => setDialog(null)
     const result = dialog.onAlt()
     if (result === undefined) {
-      close()
+      setDialog(null)
       return
     }
     setPending('alt')
@@ -91,7 +115,7 @@ export default function AppDialog() {
     void Promise.resolve(result)
       .then(() => {
         setPending(null)
-        close()
+        if (useUiStore.getState().dialog === dialog) setDialog(null)
       })
       .catch((e: unknown) => {
         setPending(null)
@@ -105,9 +129,17 @@ export default function AppDialog() {
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !pending) setDialog(null)
       }}
+      onKeyDown={trapTab}
       data-testid="app-dialog"
     >
-      <div className="w-[400px] rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={dialog.title}
+        tabIndex={-1}
+        className="w-[400px] rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl outline-none"
+      >
         <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-100">
           {dialog.kind === 'confirm' && dialog.danger && <TriangleAlert className="h-4 w-4 shrink-0 text-red-400" />}
           {dialog.title}
@@ -128,6 +160,8 @@ export default function AppDialog() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') confirm()
               }}
+              autoFocus
+              aria-label={dialog.title}
               className={`mt-3 w-full rounded-lg border bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none ${
                 error ? 'border-red-500/60 focus:border-red-500' : 'border-zinc-700 focus:border-emerald-500/60'
               }`}
@@ -140,6 +174,7 @@ export default function AppDialog() {
         {error && (
           <div
             className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300"
+            role="alert"
             data-testid="app-dialog-error"
           >
             <p className="font-medium">{error.title}</p>

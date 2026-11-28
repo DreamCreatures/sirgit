@@ -83,8 +83,11 @@ pub fn classify(command: &str, stderr: &str) -> GitError {
         "checkout-conflict"
     } else if s.contains("You are in the middle of a merge") || s.contains("You have not concluded your merge") {
         "merge-in-progress"
-    } else if s.contains("You are in the middle of a rebase") || s.contains("You have unstaged changes") && s.contains("rebase") {
+    } else if s.contains("You are in the middle of a rebase") || s.contains("cannot rebase") && s.contains("rebase") {
         "rebase-in-progress"
+    } else if s.contains("Not possible to fast-forward") || s.contains("diverging branches") {
+        // merge --ff-only on a diverged branch (pull / fast-forward checkout)
+        "not-fast-forward"
     } else if s.contains("timed out") {
         "timeout"
     } else {

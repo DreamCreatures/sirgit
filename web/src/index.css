@@ -61,3 +61,46 @@ button:disabled {
   animation: sirgit-drawer-in 0.18s ease-out;
 }
 
+/* Lane-move animation: when a graph op (merge, move, checkout, stash, …)
+ * reassigns lanes, the nodes + chip groups SLIDE to their new columns while
+ * the moved edges cross-fade (old geometry out, new in). The graph store
+ * holds the previous layout for ~420ms; these classes carry the motion. */
+.lane-slide {
+  transition:
+    left 400ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    right 400ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes sirgit-edge-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes sirgit-edge-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.edge-out {
+  animation: sirgit-edge-out 400ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+.edge-in {
+  animation: sirgit-edge-in 400ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lane-slide {
+    transition: none;
+  }
+  .edge-out,
+  .edge-in,
+  .animate-drawer-in {
+    animation: none;
+  }
+}
+

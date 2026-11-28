@@ -58,6 +58,10 @@ pub struct OpState {
     pub progress: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<serde_json::Value>,
+    /// set while git is waiting on the credentials helper — clone has no repo
+    /// room, so the poller (not a WS event) raises the credentials modal
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credentials_remote: Option<String>,
 }
 
 pub struct RepoState {
@@ -150,6 +154,7 @@ impl AppState {
             status: "running".into(),
             progress: Vec::new(),
             error: None,
+            credentials_remote: None,
         }));
         self.ops.lock().unwrap().insert(id.clone(), state.clone());
         (id, state.clone())

@@ -10,6 +10,15 @@ import { assignLanes, buildEdges, type BranchTip, type EdgeSeg, type LaneLayout,
  * "load more" that re-downloaded and re-rendered the whole history.
  */
 
+/** Snapshot of the PREVIOUS layout, kept briefly so lane moves can animate. */
+export interface LaneAnim {
+  lanes: Map<string, number>
+  edges: EdgeSeg[]
+  laneCount: number
+  /** Date.now() at snapshot time — clears itself after the transition */
+  at: number
+}
+
 interface GraphState {
   path: string | null
   rowsBySha: Map<string, CommitRow>
@@ -22,6 +31,10 @@ interface GraphState {
   ordered: CommitRow[]
   laneLayout: LaneLayout
   edges: EdgeSeg[]
+  /** previous layout when rows changed lanes — drives the slide/cross-fade */
+  anim: LaneAnim | null
+  /** load failure ("path is not a repository", …) — replaces the fake empty graph */
+  loadError: string | null
   revision: number | null
   total: number
   /** next server-side offset to fetch (monotonic per revision) */
@@ -50,6 +63,42 @@ function derive(
   return { ordered, laneLayout, edges }
 }
 
+const ANIM_MS = 420
+
+/**
+ * Snapshot the PREVIOUS layout when rows changed lanes: merge, move,
+ * checkout, stash … all reassign chains, and the nodes should SLIDE to their
+ * new columns (with the old edges fading out) instead of teleporting.
+ * Pages that only append rows (no lane change) skip the snapshot.
+ */
+function withAnim(
+  prev: { laneLayout: LaneLayout; edges: EdgeSeg[] },
+  next: LaneLayout,
+): LaneAnim | null {
+  let moved = false
+  for (const [sha, lane] of prev.laneLayout.lanes) {
+    if (next.lanes.get(sha) !== lane) {
+      moved = true
+      break
+    }
+  }
+  if (!moved) return null
+  return {
+    lanes: prev.laneLayout.lanes,
+    edges: prev.edges,
+    laneCount: prev.laneLayout.laneCount,
+    at: Date.now(),
+  }
+}
+
+function scheduleAnimClear(set: (partial: Partial<GraphState>) => void, get: () => GraphState) {
+  const at = get().anim?.at
+  if (at == null) return
+  setTimeout(() => {
+    if (get().anim?.at === at) set({ anim: null })
+  }, ANIM_MS + 60)
+}
+
 export const useGraphStore = create<GraphState>((set, get) => ({
   path: null,
   rowsBySha: new Map(),
@@ -59,6 +108,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   ordered: [],
   laneLayout: { lanes: new Map(), laneCount: 1 },
   edges: [],
+  anim: null,
+  loadError: null,
   revision: null,
   total: 0,
   nextOffset: 0,
@@ -74,6 +125,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       ordered: [],
       laneLayout: { lanes: new Map(), laneCount: 1 },
       edges: [],
+      anim: null,
+      loadError: null,
       revision: null,
       total: 0,
       nextOffset: 0,
@@ -84,21 +137,40 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   setGraphRefs(tips, headSha) {
-    set({ branchTips: tips, headSha })
-    const { rowsBySha, laneMode } = get()
-    if (rowsBySha.size > 0) set(derive(rowsBySha, tips, headSha, laneMode))
+    const { rowsBySha, laneMode, laneLayout, edges } = get()
+    if (rowsBySha.size === 0) {
+      set({ branchTips: tips, headSha })
+      return
+    }
+    const derived = derive(rowsBySha, tips, headSha, laneMode)
+    set({
+      branchTips: tips,
+      headSha,
+      ...derived,
+      anim: withAnim({ laneLayout, edges }, derived.laneLayout),
+    })
+    scheduleAnimClear(set, get)
   },
 
   setLaneMode(mode) {
-    set({ laneMode: mode })
-    const { rowsBySha, branchTips, headSha } = get()
-    if (rowsBySha.size > 0) set(derive(rowsBySha, branchTips, headSha, mode))
+    const { rowsBySha, branchTips, headSha, laneLayout, edges } = get()
+    if (rowsBySha.size === 0) {
+      set({ laneMode: mode })
+      return
+    }
+    const derived = derive(rowsBySha, branchTips, headSha, mode)
+    set({
+      laneMode: mode,
+      ...derived,
+      anim: withAnim({ laneLayout, edges }, derived.laneLayout),
+    })
+    scheduleAnimClear(set, get)
   },
 
   async loadFirstPage() {
     const { path } = get()
     if (!path) return
-    set({ nextOffset: 0, exhausted: false })
+    set({ nextOffset: 0, exhausted: false, loadError: null })
     await get().loadOlder()
   },
 
@@ -114,11 +186,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       set({
         rowsBySha: merged,
         ...derived,
+        loadError: null,
         revision: page.revision,
         total: page.total,
         nextOffset: page.offset + page.rows.length,
         exhausted: page.offset + page.rows.length >= page.total,
       })
+    } catch (e: unknown) {
+      // a bad/moved path used to render as a FAKE empty repo ("no commits")
+      // because the error was swallowed by try/finally
+      const msg = e instanceof Error ? e.message : String(e)
+      set({ loadError: msg, exhausted: true })
     } finally {
       set({ fetchingOlder: false })
     }
@@ -132,7 +210,14 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       await get().loadFirstPage()
       return
     }
-    const delta = await api.logDelta(path, revision)
+    let delta
+    try {
+      delta = await api.logDelta(path, revision)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      set({ loadError: msg })
+      return
+    }
     if (!delta.changed) {
       set({ revision: delta.revision })
       return
@@ -154,9 +239,11 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set({
       rowsBySha,
       ...derived,
+      anim: withAnim({ laneLayout: get().laneLayout, edges: get().edges }, derived.laneLayout),
       revision: delta.revision,
       total: get().total + grow,
       exhausted: false,
     })
+    scheduleAnimClear(set, get)
   },
 }))

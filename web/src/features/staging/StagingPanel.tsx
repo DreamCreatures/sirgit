@@ -52,7 +52,7 @@ export default function StagingPanel({
   headSha?: string
   headBranch?: string
 }) {
-  const { data: status, isLoading } = useStatus(path)
+  const { data: status, isLoading, isError: statusError } = useStatus(path)
   const stagingOpen = useUiStore((s) => s.stagingOpen)
   const toggleStaging = useUiStore((s) => s.toggleStaging)
   const stagingExpanded = useUiStore((s) => s.stagingExpanded)
@@ -164,8 +164,11 @@ export default function StagingPanel({
   })
 
   const files = status?.files ?? []
+  // conflicts list ONLY in the Conflicted group: a conflicted file's index
+  // status ('U'/AA/DD) matched the staged filter, so it showed in BOTH lists
+  // and its Staged ✓ was a dead no-op (staging it = declaring resolution)
   const staged = useMemo(
-    () => files.filter((f) => f.indexStatus !== '.' && f.indexStatus !== '?'),
+    () => files.filter((f) => f.indexStatus !== '.' && f.indexStatus !== '?' && !f.conflict),
     [files],
   )
   const unstaged = useMemo(
@@ -175,7 +178,12 @@ export default function StagingPanel({
   const untracked = useMemo(() => files.filter((f) => f.untracked), [files])
   const conflicts = useMemo(() => files.filter((f) => f.conflict), [files])
 
-  const inProgress = (status?.inMerge ?? false) || (status?.inRebase ?? false) || (status?.inCherry ?? false) || (status?.inRevert ?? false)
+  const inProgress =
+    (status?.inMerge ?? false) ||
+    (status?.inRebase ?? false) ||
+    (status?.inCherry ?? false) ||
+    (status?.inRevert ?? false) ||
+    (status?.inSquash ?? false)
 
   // default-staged workflow (user rule): new changes — modified or
   // untracked — stage THEMSELVES, unless the user explicitly unstaged that
@@ -248,11 +256,16 @@ export default function StagingPanel({
               </span>
             )}
           </button>
-          {/* bulk actions: stash everything / stage everything / unstage everything */}
+          {/* bulk actions: stash everything / stage everything / unstage everything.
+              LOCKED during an in-progress merge/rebase/cherry/revert/squash: on an
+              unmerged path `restore --staged` resets the index entry to HEAD's side
+              (deselect all = silently dropping the other side) and `add .` stages
+              conflict markers as a resolution (select all) — both corrupt the
+              in-flight op; the per-file Resolve button stays available. */}
           <button
             className="flex items-center gap-1 rounded-md border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300 hover:bg-sky-500/25 disabled:opacity-40"
             title="Stash every change — tracked and untracked (git stash push -u). Restores it from the Stashed changes section above."
-            disabled={pendingKey !== null || (unstaged.length === 0 && untracked.length === 0 && staged.length === 0)}
+            disabled={pendingKey !== null || inProgress || (unstaged.length === 0 && untracked.length === 0 && staged.length === 0)}
             onClick={() => runAction('stash:__all', () => api.stashPush(path))}
             data-testid="stash-all"
           >
@@ -262,7 +275,7 @@ export default function StagingPanel({
           <button
             className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-40"
             title="Stage every change for the next commit (git add .)"
-            disabled={pendingKey === 'stage:__all' || (unstaged.length === 0 && untracked.length === 0)}
+            disabled={pendingKey === 'stage:__all' || inProgress || (unstaged.length === 0 && untracked.length === 0)}
             onClick={() => {
               setUnstagedByUser(path, []) // select-all clears every opt-out
               runAction('stage:__all', () => api.stage(path, ['.']))
@@ -275,7 +288,7 @@ export default function StagingPanel({
           <button
             className="flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-300 hover:bg-red-500/25 disabled:opacity-40"
             title="Unstage everything (changes stay in the worktree)"
-            disabled={pendingKey === 'unstage:__all' || staged.length === 0}
+            disabled={pendingKey === 'unstage:__all' || inProgress || staged.length === 0}
             onClick={() => {
               // everything being unstaged becomes opted-out (stays unstaged)
               setUnstagedByUser(path, staged.map((f) => f.path))
@@ -360,6 +373,9 @@ export default function StagingPanel({
             <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               <div ref={changesRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
           {isLoading && <p className="py-2 text-xs text-zinc-500">loading status…</p>}
+          {statusError && !isLoading && (
+            <p className="py-2 text-xs text-red-300">can’t read the working tree — is this path still a repository?</p>
+          )}
 
           {inProgress && (
             <div className="mb-3 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -370,21 +386,21 @@ export default function StagingPanel({
                     ? 'Rebase'
                     : status?.inRevert
                       ? 'Revert'
-                      : 'Cherry-pick'}{' '}
+                      : status?.inCherry
+                        ? 'Cherry-pick'
+                        : 'Squash merge'}{' '}
                 in progress — resolve conflicts, then continue.
               </span>
               <span className="flex gap-2">
                 {status?.inRebase ? (
-                  <>
-                    <ContinueAbort
-                      abortTitle="Abort rebase"
-                      abortMessage="Stops the rebase and restores the branch to where it was. Conflict resolutions that were not committed are lost."
-                      onContinue={() => api.rebaseContinue(path)}
-                      onAbort={() => api.rebaseAbort(path)}
-                      ghostTarget={headSha}
-                      {...afterOp}
-                    />
-                  </>
+                  <ContinueAbort
+                    abortTitle="Abort rebase"
+                    abortMessage="Stops the rebase and restores the branch to where it was. Conflict resolutions that were not committed are lost."
+                    onContinue={() => api.rebaseContinue(path)}
+                    onAbort={() => api.rebaseAbort(path)}
+                    ghostTarget={headSha}
+                    {...afterOp}
+                  />
                 ) : status?.inRevert ? (
                   <ContinueAbort
                     abortTitle="Abort revert"
@@ -394,7 +410,19 @@ export default function StagingPanel({
                     ghostTarget={headSha}
                     {...afterOp}
                   />
+                ) : status?.inCherry ? (
+                  <ContinueAbort
+                    abortTitle="Abort cherry-pick"
+                    abortMessage="Stops the cherry-pick and restores the branch to where it was. Conflict resolutions that were not committed are lost."
+                    onContinue={() => api.cherryPickContinue(path)}
+                    onAbort={() => api.cherryPickAbort(path)}
+                    ghostTarget={headSha}
+                    {...afterOp}
+                  />
                 ) : (
+                  // plain merge AND conflicted squash merge — the server's
+                  // merge-abort detects the SQUASH_MSG shape (no MERGE_HEAD)
+                  // and aborts via reset --hard
                   <ContinueAbort
                     abortTitle="Abort merge"
                     abortMessage="Stops the merge and restores the branch to the pre-merge state. Conflict resolutions that were not committed are lost."
@@ -711,7 +739,7 @@ function InlineDiff({
   staged: boolean
   onClose: () => void
 }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['worktree-diff', path, file, staged],
     queryFn: () => api.worktreeDiff(path, file, staged),
   })
@@ -722,7 +750,13 @@ function InlineDiff({
           close diff
         </button>
       </div>
-      {isLoading ? <p className="px-2 py-1 text-xs text-zinc-500">loading…</p> : <DiffView diff={data ?? ''} />}
+      {isLoading ? (
+        <p className="px-2 py-1 text-xs text-zinc-500">loading…</p>
+      ) : isError ? (
+        <p className="px-2 py-1 text-xs text-red-300">diff failed — the file may have just changed on disk</p>
+      ) : (
+        <DiffView diff={data ?? ''} />
+      )}
     </div>
   )
 }

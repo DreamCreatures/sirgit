@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Folder, FolderGit2, Download, Plus, Trash2, ArrowRight, GitBranch } from 'lucide-react'
-import { api, pollOp } from '../../lib/client'
+import { api, GitRequestError } from '../../lib/client'
 import type { DirEntry } from '../../lib/types'
 import { useUiStore } from '../../state/uiStore'
 import { friendlyError } from '../../lib/gitErrors'
@@ -193,11 +193,37 @@ export default function HomePage() {
 
   const doClone = async () => {
     if (!cloneUrl.trim()) return
-    const dest = cleanPath(cloneDest) || (useUiStore.getState().lastWorkDir ? `${useUiStore.getState().lastWorkDir}/${repoNameFromUrl(cloneUrl)}` : repoNameFromUrl(cloneUrl)) || 'repo'
+    // no working directory yet → the home dir (`~` — the server expands it),
+    // never a repo relative to the server's own cwd
+    const dest =
+      cleanPath(cloneDest) ||
+      (useUiStore.getState().lastWorkDir
+        ? `${useUiStore.getState().lastWorkDir}/${repoNameFromUrl(cloneUrl)}`
+        : `~/${repoNameFromUrl(cloneUrl)}`) ||
+      'repo'
     setBusy('clone')
     try {
       const { opId } = await api.clone(cloneUrl.trim(), dest)
-      await pollOp(opId)
+      // poll inline (not pollOp): a private clone has no repo room, so the
+      // credentials modal must ride the op status instead of a WS event
+      for (;;) {
+        const op = await api.opStatus(opId)
+        if (op.status === 'done') break
+        if (op.status === 'error') {
+          const err = op.error
+          throw new GitRequestError(
+            err?.code ?? 'unknown',
+            err?.message ?? 'operation failed',
+            err?.command,
+            err?.stderr,
+          )
+        }
+        if (op.credentialsRemote && !useUiStore.getState().credentialsRequest) {
+          useUiStore.getState().setCredentialsRequest({ opId, remote: op.credentialsRemote })
+        }
+        await new Promise((r) => setTimeout(r, 700))
+      }
+      useUiStore.getState().setCredentialsRequest(null)
       // clones join the repository list by default (user rule), land in
       // recent, open straight away, and their parent becomes the new
       // default working directory for the next clone
@@ -226,7 +252,20 @@ export default function HomePage() {
     }
     const name = repoNameFromUrl(v)
     const root = useUiStore.getState().lastWorkDir
-    setCloneDest(name ? (root ? `${root}/${name}` : name) : '')
+    setCloneDest(name ? (root ? `${root}/${name}` : `~/${name}`) : '')
+  }
+
+  /** destructive list wipe — confirm first (an accidental click used to
+   *  throw away the whole accumulated repository list) */
+  const confirmClear = (title: string, message: string, run: () => void) => {
+    useUiStore.getState().setDialog({
+      kind: 'confirm',
+      danger: true,
+      title,
+      message,
+      confirmLabel: 'Clear',
+      onConfirm: run,
+    })
   }
 
   return (
@@ -248,6 +287,8 @@ export default function HomePage() {
             ref={inputRef}
             className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
             placeholder="/parent/directory — or a single repo's absolute path"
+            aria-label="Working directory path"
+            spellCheck={false}
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
             onKeyDown={onPathKeyDown}
@@ -307,7 +348,13 @@ export default function HomePage() {
             <h2 className="text-sm font-medium text-zinc-400">Repositories</h2>
             <button
               className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-              onClick={clearRepos}
+              onClick={() =>
+                confirmClear(
+                  'Clear the repository list?',
+                  `Removes all ${repos.length} entries from the list. The repositories on disk are untouched.`,
+                  clearRepos,
+                )
+              }
               title="Clear the whole repository list"
               data-testid="clear-repos"
             >
@@ -338,15 +385,25 @@ export default function HomePage() {
           <input
             className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
             placeholder="https://github.com/user/repo.git — or git@host:u/repo.git"
+            aria-label="Clone URL"
+            spellCheck={false}
             value={cloneUrl}
             onChange={(e) => onCloneUrlChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void doClone()
+            }}
           />
           <div className="flex gap-2">
             <input
               className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-emerald-600"
               placeholder="Destination directory (optional)"
+              aria-label="Clone destination directory"
+              spellCheck={false}
               value={cloneDest}
               onChange={(e) => setCloneDest(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void doClone()
+              }}
             />
             <button
               className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-700 disabled:opacity-50"
@@ -367,7 +424,13 @@ export default function HomePage() {
             <h2 className="text-sm font-medium text-zinc-400">Recent</h2>
             <button
               className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-              onClick={clearRecentRepos}
+              onClick={() =>
+                confirmClear(
+                  'Clear the recent list?',
+                  'Removes all recent entries. Recent is rebuilt as you open repositories.',
+                  clearRecentRepos,
+                )
+              }
               title="Clear the recent list"
               data-testid="clear-recent"
             >

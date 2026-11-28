@@ -3,33 +3,10 @@ import { GitBranch, Tag } from 'lucide-react'
 import type { CommitRow, RefInfo } from '../../lib/types'
 import { relTime } from '../../lib/time'
 import { abbrevRemote, abbrevRemoteRef } from '../../lib/remoteLabel'
-import { useGraphStore } from '../../state/graphStore'
+import { containsCommit } from '../../lib/dag'
 import { useUiStore } from '../../state/uiStore'
 import { ROW_H, laneX } from './GraphView'
 import { laneColor } from './GraphEdges'
-
-/**
- * Is `ancestorSha` reachable from `fromSha` through the loaded rows' parents
- * (full DAG walk, not first-parent — containment is topological)? Used to
- * detect no-op merges: the armed branch is already contained in the target.
- * Bounded; a parent outside the loaded window reads as "not contained", so
- * the server's clear error remains the final guard.
- */
-function containsCommit(fromSha: string, ancestorSha: string): boolean {
-  const rows = useGraphStore.getState().rowsBySha
-  const seen = new Set<string>()
-  const stack = [fromSha]
-  while (stack.length > 0 && seen.size < 5000) {
-    const cur = stack.pop()!
-    if (cur === ancestorSha) return true
-    if (seen.has(cur)) continue
-    seen.add(cur)
-    const row = rows.get(cur)
-    if (!row) continue
-    stack.push(...row.parents)
-  }
-  return false
-}
 
 interface GraphRowProps {
   row: CommitRow
@@ -269,9 +246,11 @@ function GraphRowInner({
       {/* lane node — outlined circle in the lane color; solid when selected;
        *  picking the node ITSELF (vs a ref chip) also grows it 20%.
        *  Same padding on every side keeps the circle centered on (laneX,
-       *  ROW_H/2), the point the edge layer draws its lines through. */}
+       *  ROW_H/2), the point the edge layer draws its lines through.
+       *  Keyboard: focusable button semantics (Tab reaches nodes; Enter/Space
+       *  selects) — the hover-revealed row actions remain mouse-only. */}
       <div
-        className="absolute cursor-pointer"
+        className="lane-slide absolute cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 rounded-full"
         style={{ left: x - r - NODE_PAD, top: (ROW_H - 2 * (r + NODE_PAD)) / 2 }}
         onMouseEnter={() => {
           setNodeHovered(true)
@@ -282,6 +261,16 @@ function GraphRowInner({
           e.stopPropagation()
           onSelect(row.sha)
         }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            e.stopPropagation()
+            onSelect(row.sha)
+          }
+        }}
+        tabIndex={0}
+        role="button"
+        aria-label={`Commit ${row.sha.slice(0, 7)}: ${row.subject}`}
         title={`Select commit ${row.sha.slice(0, 7)}${hasRowActions ? ' — hover shows this row\u2019s actions' : ''}`}
         data-testid="graph-node"
       >
@@ -317,7 +306,7 @@ function GraphRowInner({
        * node on the left side, the message continuing away from it. */}
       {(msgWithTags || tags.length > 0) && (
         <div
-          className={`absolute inset-y-0 flex items-center gap-2${tagSide === 'left' ? ' flex-row-reverse' : ''}`}
+          className={`lane-slide absolute inset-y-0 flex items-center gap-2${tagSide === 'left' ? ' flex-row-reverse' : ''}`}
           style={
             tagSide === 'left'
               ? { left: 16, right: (graphW ?? 0) - (x - r - 10) }
@@ -377,7 +366,7 @@ function GraphRowInner({
        * (left mode: the right-of-node flow carries the message too). Branch
        * names hug their node; buttons trail outward. */}
       <div
-        className={`absolute inset-y-0 flex items-center gap-1.5${tagSide === 'right' ? ' flex-row-reverse' : ''}`}
+        className={`lane-slide absolute inset-y-0 flex items-center gap-1.5${tagSide === 'right' ? ' flex-row-reverse' : ''}`}
         style={
           tagSide === 'right'
             ? { left: 16, right: (graphW ?? 0) - (x - r - 10) }

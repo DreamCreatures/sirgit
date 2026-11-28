@@ -16,7 +16,7 @@ pub struct PathQuery {
 }
 
 pub async fn quickstatus(Query(q): Query<PathQuery>) -> ApiResult<Json<repo::QuickStatus>> {
-    Ok(Json(repo::quickstatus(&q.path)))
+    Ok(Json(repo::quickstatus(&repo::expand_home(&q.path))))
 }
 
 #[derive(Deserialize)]
@@ -27,7 +27,7 @@ pub struct InitParams {
 }
 
 pub async fn init(State(_app): State<Arc<AppState>>, Json(p): Json<InitParams>) -> ApiResult<Json<serde_json::Value>> {
-    let path = PathBuf::from(&p.path);
+    let path = PathBuf::from(repo::expand_home(&p.path));
     ops::init_repo(&path, p.bare)
         .await
         .map_err(ApiError::Git)?;
@@ -40,7 +40,8 @@ pub struct CreateDirParams {
 }
 
 pub async fn createdir(Json(p): Json<CreateDirParams>) -> ApiResult<Json<serde_json::Value>> {
-    std::fs::create_dir_all(&p.path).map_err(ApiError::Io)?;
+    let path = repo::expand_home(&p.path);
+    std::fs::create_dir_all(&path).map_err(ApiError::Io)?;
     Ok(Json(serde_json::json!({})))
 }
 
@@ -53,7 +54,7 @@ pub struct CloneParams {
 }
 
 pub async fn clone(State(app): State<Arc<AppState>>, Json(p): Json<CloneParams>) -> ApiResult<Json<serde_json::Value>> {
-    let dir = PathBuf::from(&p.path);
+    let dir = PathBuf::from(repo::expand_home(&p.path));
     if dir.exists() && std::fs::read_dir(&dir).map(|mut d| d.next().is_some()).unwrap_or(false) {
         return Err(ApiError::BadRequest(format!("directory not empty: {}", p.path)));
     }
@@ -94,7 +95,12 @@ pub async fn op_status(
     let Some(op) = app.get_op(&op_id) else {
         return Err(ApiError::NotFound(format!("unknown op {}", op_id)));
     };
-    let op = op.lock().await.clone();
+    let mut op = op.lock().await.clone();
+    // a pending credentials request rides the op status so CLONE (no repo
+    // room → no WS event) can still raise the credentials modal
+    if let Some(pending) = app.creds.get(&op_id) {
+        op.credentials_remote = Some(pending.remote.clone());
+    }
     Ok(Json(op))
 }
 
@@ -111,7 +117,7 @@ pub struct DirEntry {
 /// symlinked dirs followed), case-insensitively sorted, capped at 500.
 /// Drives the ungit-style sibling autocomplete on the home page's path input.
 pub async fn fs_list(Query(q): Query<PathQuery>) -> ApiResult<Json<Vec<DirEntry>>> {
-    Ok(Json(list_dirs(&q.path).map_err(ApiError::Io)?))
+    Ok(Json(list_dirs(&repo::expand_home(&q.path)).map_err(ApiError::Io)?))
 }
 
 fn list_dirs(dir: &str) -> std::io::Result<Vec<DirEntry>> {

@@ -62,6 +62,8 @@ export interface StatusSnapshot {
   inRebase: boolean
   inCherry: boolean
   inRevert: boolean
+  /** conflicted `merge --squash` — no MERGE_HEAD, changes staged, SQUASH_MSG on disk */
+  inSquash: boolean
 }
 
 export interface CommitFile {
@@ -124,6 +126,8 @@ export interface OpState {
   status: 'running' | 'done' | 'error'
   progress: string[]
   error?: { code: string; message: string; command?: string; stderr?: string }
+  /** set while git waits on the credentials helper (clone has no WS room) */
+  credentialsRemote?: string
 }
 
 export interface RefsResponse extends RefsSnapshot {

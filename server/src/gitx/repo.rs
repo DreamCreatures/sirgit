@@ -27,6 +27,23 @@ fn is_git_repo(path: &Path) -> bool {
     path.join(".git").exists()
 }
 
+/// Expand a leading `~` to the user's home directory ("~/x" → "/home/u/x").
+/// The home page passes typed paths through verbatim; without this a `~/x`
+/// submission created a literal `~` directory under the server's cwd.
+pub fn expand_home(p: &str) -> String {
+    if p == "~" {
+        return dirs::home_dir()
+            .map(|h| h.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.to_string());
+    }
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).to_string_lossy().into_owned();
+        }
+    }
+    p.to_string()
+}
+
 /// Immediate git-repo children of a directory, as ABSOLUTE paths (the home
 /// page imports them verbatim into its repository list).
 fn find_sub_repos(path: &Path) -> Vec<String> {
@@ -47,7 +64,7 @@ fn find_sub_repos(path: &Path) -> Vec<String> {
 /// Classify a filesystem path the same way the frontend needs:
 /// missing dir / plain dir / repo / bare repo (+ immediate sub-repos for the "choose a repo" view).
 pub fn quickstatus(path: &str) -> QuickStatus {
-    let p = PathBuf::from(path);
+    let p = PathBuf::from(expand_home(path));
     if !p.exists() {
         return QuickStatus { kind: RepoKind::NoSuchPath, git_root_path: None, git_dir: None, sub_repos: None };
     }
@@ -74,6 +91,21 @@ pub fn quickstatus(path: &str) -> QuickStatus {
             }
         }
     } else if p.is_dir() {
+        // a SUBFOLDER of a repo used to classify as uninited → the home page
+        // offered "Initialize repository?" and created a NESTED repo. Walk up
+        // to the enclosing .git instead: the folder IS part of that repo.
+        let mut cur: &Path = &p;
+        while let Some(parent) = cur.parent() {
+            if is_git_repo(parent) {
+                return QuickStatus {
+                    kind: RepoKind::Repo,
+                    git_root_path: Some(parent.to_string_lossy().into_owned()),
+                    git_dir: None,
+                    sub_repos: Some(find_sub_repos(&p)),
+                };
+            }
+            cur = parent;
+        }
         let sub = find_sub_repos(&p);
         QuickStatus { kind: RepoKind::Uninited, git_root_path: None, git_dir: None, sub_repos: Some(sub) }
     } else {

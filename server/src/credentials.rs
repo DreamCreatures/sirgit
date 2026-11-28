@@ -18,11 +18,16 @@ pub struct PendingCred {
 
 pub struct CredentialsRegistry {
     pending: Mutex<HashMap<String, Arc<PendingCred>>>,
+    /// credentials remembered per remote (remote NAME for repo ops, full URL
+    /// for clones) so every subsequent fetch/push/pull in this session runs
+    /// without re-prompting. Memory-only by design — nothing touches the
+    /// keychain or disk.
+    stored: Mutex<HashMap<String, (String, String)>>,
 }
 
 impl CredentialsRegistry {
     pub fn new() -> Self {
-        Self { pending: Mutex::new(HashMap::new()) }
+        Self { pending: Mutex::new(HashMap::new()), stored: Mutex::new(HashMap::new()) }
     }
 
     pub fn register(&self, op_id: &str, remote: &str) {
@@ -41,9 +46,26 @@ impl CredentialsRegistry {
         self.pending.lock().unwrap().get(op_id).cloned()
     }
 
+    /// Previously-answered credentials for this remote (this session).
+    pub fn stored_for(&self, remote: &str) -> Option<(String, String)> {
+        self.stored.lock().unwrap().get(remote).cloned()
+    }
+
+    pub fn store(&self, remote: &str, username: &str, password: &str) {
+        if username.is_empty() || password.is_empty() {
+            return;
+        }
+        self.stored
+            .lock()
+            .unwrap()
+            .insert(remote.to_string(), (username.to_string(), password.to_string()));
+    }
+
     pub fn resolve(&self, op_id: &str, username: &str, password: &str) -> bool {
         let Some(p) = self.get(op_id) else { return false };
         *p.creds.lock().unwrap() = Some((username.to_string(), password.to_string()));
+        // remember for the session — the next op on this remote skips the modal
+        self.store(&p.remote, username, password);
         p.notify.notify_waiters();
         true
     }

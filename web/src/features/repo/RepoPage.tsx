@@ -8,6 +8,7 @@ import { useRepoEvents } from '../../lib/ws'
 import { useGraphStore } from '../../state/graphStore'
 import { useUiStore, type SelectedRef } from '../../state/uiStore'
 import { friendlyError } from '../../lib/gitErrors'
+import { containsCommit } from '../../lib/dag'
 import GraphView from '../graph/GraphView'
 import RefsPanel from '../refs/RefsPanel'
 import StagingPanel from '../staging/StagingPanel'
@@ -75,6 +76,13 @@ export default function RepoPage() {
 
   useRepoEvents(path || null, (ev) => {
     switch (ev.type) {
+      case 'hello':
+        // (re)connect: a revision we haven't seen (server restart, missed
+        // events) → delta sync decides no-op vs full resync
+        if (ev.revision != null && useGraphStore.getState().revision !== null && ev.revision !== useGraphStore.getState().revision) {
+          void applyDelta()
+        }
+        break
       case 'changed':
         void applyDelta()
         void qc.invalidateQueries({ queryKey: ['refs', path] })
@@ -146,13 +154,15 @@ export default function RepoPage() {
   const currentBranch = refs?.head?.branch
   const pullBranch = currentBranch ?? null
   // the prospective next commit: something staged, or an in-flight merge /
-  // rebase / cherry-pick / revert waiting on conflict resolution → dashed ghost node
+  // rebase / cherry-pick / revert / squash-merge waiting on conflict
+  // resolution → dashed ghost node
   const nextCommit =
     !!statusSnap &&
     (statusSnap.inMerge ||
       statusSnap.inRebase ||
       statusSnap.inCherry ||
       statusSnap.inRevert ||
+      statusSnap.inSquash ||
       statusSnap.files.some((f) => f.indexStatus !== '.' && f.indexStatus !== '?'))
 
   // hovering any action that would create a commit (Commit, merge/squash merge,
@@ -216,16 +226,10 @@ export default function RepoPage() {
           : null
       : null
 
-  /** is `ancestor` reachable from `from` via first parents (loaded window)? */
-  const isAncestorOf = (ancestor: string, from: string): boolean => {
-    const rows = useGraphStore.getState().rowsBySha
-    let cursor: string | undefined = from
-    for (let i = 0; i < 500 && cursor; i++) {
-      if (cursor === ancestor) return true
-      cursor = rows.get(cursor)?.parents[0]
-    }
-    return false
-  }
+  /** is `ancestor` reachable from `from` — FULL-DAG walk over the loaded rows
+   *  (the old first-parent walk missed merge second parents and produced
+   *  false "diverged → Reset to remote" dialogs for perfectly fine states) */
+  const isAncestorOf = (ancestor: string, from: string): boolean => containsCommit(from, ancestor)
 
   /** rebase the checked-out branch onto a commit — immediate (ungit's fluidity):
    *  the hover preview is the confirmation; conflicts pause in the staging area */
@@ -362,15 +366,36 @@ export default function RepoPage() {
         ),
     })
   }
-  // merge the armed branch into another branch (row buttons) — immediate:
-  // fast-forwards and merges are recoverable, conflicts surface in the
-  // staging area, and the hover preview already showed the merge commit
+  // merge the armed branch into another branch (row buttons). The SOURCE
+  // branch is synced FIRST (user rule: "git pull main, then merge main into
+  // branchA"): fetch --prune its upstream, fast-forward it when behind —
+  // merging a stale branch is exactly the error this avoids. The fetch needs
+  // the network-op plumbing, so it runs client-side before the merge call;
+  // when the upstream is unreachable the merge does NOT run (merging a
+  // knowingly-stale branch silently would be worse) and the reason surfaces.
   const mergeInto = (into: string, squash: boolean) => {
     if (!selBranch) return
     const from = selBranch.name
+    const upstream = from !== currentBranch ? selBranch.upstream : undefined
     useUiStore.getState().beginOp(squash ? 'Squash merge' : 'Merge')
-    void api
-      .branchMerge(path, from, into, squash)
+    const prep = upstream
+      ? (async () => {
+          const remote = upstream.split('/')[0]
+          useUiStore.getState().setNetBusy('Fetch')
+          try {
+            const { opId } = await api.fetch(path, remote)
+            await pollOp(opId)
+            // fast-forward `from` to its upstream (no checkout; up-to-date is a
+            // no-op, divergence refuses — a refused sync must not fall through
+            // into a merge against the stale branch)
+            await api.branchFastForward(path, from, upstream, false)
+          } finally {
+            useUiStore.getState().setNetBusy(null)
+          }
+        })()
+      : Promise.resolve()
+    prep
+      .then(() => api.branchMerge(path, from, into, squash))
       .then((res) => {
         useUiStore.getState().select(null)
         if (squash && res?.title) {
@@ -386,20 +411,33 @@ export default function RepoPage() {
       })
       .catch((e: unknown) => {
         const { title: t, detail: d } = friendlyError(e)
-        toast({ kind: 'error', title: t, detail: d })
+        const syncedNote =
+          upstream && !(e instanceof Error && /fast-forward|fetch/i.test(e.message))
+            ? undefined
+            : `Merge skipped — ${from} could not be synced with ${upstream}`
+        toast({ kind: 'error', title: t, detail: d ? `${syncedNote ?? ''}\n${d}`.trim() : syncedNote })
         refreshAll()
       })
       .finally(() => useUiStore.getState().endOp())
   }
 
-  // Esc disarms: closes the action popup / selection (dialogs and modals
-  // dismiss themselves first)
+  // Esc unwinds in layers: dialogs and modals dismiss themselves first
+  // (AppDialog/SquashModal handle their own keys), then the selection, then
+  // the details drawer, then the grown staging overlay.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       const s = useUiStore.getState()
-      if (s.dialog || s.squashModal) return
-      if (s.selectedSha !== null) s.select(null)
+      if (s.dialog || s.squashModal || s.credentialsRequest) return
+      if (s.selectedSha !== null) {
+        s.select(null)
+        return
+      }
+      if (s.detailsSha !== null) {
+        s.setDetailsSha(null)
+        return
+      }
+      if (s.stagingExpanded) s.setStagingExpanded(false)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -415,6 +453,9 @@ export default function RepoPage() {
       if (t.closest('[data-testid="selection-popup"]')) return
       if (t.closest('[data-action-preview]')) return
       if (t.closest('[data-testid="app-dialog"]')) return
+      // interacting with the staging area or the header must not kill the
+      // drawer — only a click on the map itself reads as "done reading"
+      if (t.closest('[data-testid="staging"]') || t.closest('header')) return
       useUiStore.getState().setDetailsSha(null)
       useUiStore.getState().select(null)
     }
@@ -533,7 +574,8 @@ export default function RepoPage() {
   // risk-free, so the bring/stash question would be noise.
   const guardedCheckout = (name: string, trackFrom?: string) => {
     const inProgress =
-      !!statusSnap && (statusSnap.inMerge || statusSnap.inRebase || statusSnap.inCherry || statusSnap.inRevert)
+      !!statusSnap &&
+      (statusSnap.inMerge || statusSnap.inRebase || statusSnap.inCherry || statusSnap.inRevert || statusSnap.inSquash)
     const targetSha = trackFrom
       ? refs?.remoteBranches.find((r) => r.name === trackFrom)?.sha
       : (refs?.branches.find((b) => b.name === name)?.sha ?? refs?.tags.find((t) => t.name === name)?.sha)
@@ -623,7 +665,7 @@ export default function RepoPage() {
         title: `"${local}" has diverged from ${remoteRef}`,
         message:
           `"${local}" has commits ${remoteRef} doesn't. A fast-forward is impossible; resetting it to ${remoteRef} makes those local commits unreachable (recoverable only via reflog).\n\n` +
-          'Rebase onto it, or drag-move the branch, to keep them instead.',
+          'This is reset --hard: any UNCOMMITTED changes in the worktree are discarded with it. Rebase onto it, or drag-move the branch, to keep them instead.',
         confirmLabel: 'Reset to remote',
         onConfirm: () => run(true),
       })

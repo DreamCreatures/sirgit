@@ -107,14 +107,14 @@ describe('assignLanes with branch tips', () => {
     ]
     const { lanes, laneCount } = assignLanes(ordered, tips, 'h')
     // trunk holds the MIDDLE slot of the tree layout — HEAD is its column top
-    expect(lanes.get('h')).toBe(2)
-    expect(lanes.get('p')).toBe(2)
-    // branches alternate sides, first ring double-spaced:
-    // d1 → trunk+2 (right), d2 → trunk−2 (left), d3 → trunk+3
-    expect(lanes.get('d1')).toBe(4)
+    expect(lanes.get('h')).toBe(1)
+    expect(lanes.get('p')).toBe(1)
+    // branches alternate sides with uniform single-lane spacing:
+    // d1 → trunk+1 (right), d2 → trunk−1 (left), d3 → trunk+2
+    expect(lanes.get('d1')).toBe(2)
     expect(lanes.get('d2')).toBe(0)
-    expect(lanes.get('d3')).toBe(5)
-    expect(laneCount).toBe(6)
+    expect(lanes.get('d3')).toBe(3)
+    expect(laneCount).toBe(4)
   })
 
   it('a branch chain draws as one straight column', () => {
@@ -126,8 +126,8 @@ describe('assignLanes with branch tips', () => {
     ]
     const { lanes } = assignLanes(ordered, tips, 'b')
     expect(lanes.get('b')).toBe(0)
-    expect(lanes.get('f1')).toBe(2)
-    expect(lanes.get('f2')).toBe(2) // linear feature history: one column
+    expect(lanes.get('f1')).toBe(1)
+    expect(lanes.get('f2')).toBe(1) // linear feature history: one column
   })
 
   it('a remote tip that is an ancestor of its local branch adds no lane', () => {
@@ -138,9 +138,9 @@ describe('assignLanes with branch tips', () => {
       { sha: 'f1', current: false }, // origin/feature behind local
     ]
     const { lanes, laneCount } = assignLanes(ordered, tips, 'b')
-    expect(lanes.get('f1')).toBe(2)
-    expect(lanes.get('f2')).toBe(2)
-    expect(laneCount).toBe(3)
+    expect(lanes.get('f1')).toBe(1)
+    expect(lanes.get('f2')).toBe(1)
+    expect(laneCount).toBe(2)
   })
 
   it('scales to 100k commits with 50 side branches', () => {
@@ -158,7 +158,7 @@ describe('assignLanes with branch tips', () => {
     const ordered = orderRows(rows)
     const { laneCount } = assignLanes(ordered, tips, 's99999')
     const dt = performance.now() - t0
-    expect(laneCount).toBe(53) // 50 branches, first ring double-spaced (±2..±26)
+    expect(laneCount).toBe(51) // 50 branches alternating ±1..±25 → 51 lanes
     expect(dt).toBeLessThan(500)
   })
 })

@@ -23,13 +23,15 @@ pub struct CliArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct SirgitConfig {
     pub port: u16,
     pub launch_browser: bool,
     /// Fetch remotes once when a repo is opened (never on file-watch events)
+    #[serde(alias = "auto_fetch_on_open")]
     pub auto_fetch_on_open: bool,
     /// Number of commits per log page
+    #[serde(alias = "page_size")]
     pub page_size: u32,
     pub theme: String,
 }

@@ -149,6 +149,8 @@ export const api = {
   revertContinue: (path: string) => post('/revert/continue', { path }),
   revertAbort: (path: string) => post('/revert/abort', { path }),
   cherryPick: (path: string, sha: string) => post('/cherry-pick', { path, sha }),
+  cherryPickContinue: (path: string) => post('/cherry-pick/continue', { path }),
+  cherryPickAbort: (path: string) => post('/cherry-pick/abort', { path }),
 
   stashList: async (path: string): Promise<import('./types').StashEntry[]> =>
     (await request<{ stashes: import('./types').StashEntry[] }>(`/stash?path=${encodeURIComponent(path)}`)).stashes,
@@ -164,8 +166,8 @@ export const api = {
   stashDrop: (path: string, index: number) => post('/stash/drop', { path, index }),
 
   fetch: (path: string, remote?: string) => post<{ opId: string }>('/fetch', { path, remote }),
-  push: (path: string, remote: string, refspec: string, force = false) =>
-    post<{ opId: string }>('/push', { path, remote, refspec, force }),
+  push: (path: string, remote: string, refspec: string, force = false, setUpstream = false) =>
+    post<{ opId: string }>('/push', { path, remote, refspec, force, setUpstream }),
   pull: (path: string, branch?: string) => post<{ opId: string }>('/pull', { path, branch }),
   clone: (url: string, path: string, recurseSubmodules = false) =>
     post<{ opId: string }>('/clone', { url, path, recurseSubmodules }),

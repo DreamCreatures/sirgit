@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Scissors, ArrowRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Scissors, ArrowRight, AlertTriangle } from 'lucide-react'
 import { api } from '../../lib/client'
 import type { CommitRow } from '../../lib/types'
 import { useUiStore } from '../../state/uiStore'
@@ -44,14 +44,47 @@ export default function SquashModal({
     return out
   }, [modal, rowsBySha])
 
+  // the squash collapses a FIRST-PARENT run, so the target must sit on the
+  // branch's first-parent chain. FULL-DAG reachability (not the walk above,
+  // which stops at the first break): a target off-chain (behind a merge's
+  // second parent) used to list an unrelated chain and squash nonsense.
+  const targetValid = useMemo(() => {
+    if (!modal) return false
+    const seen = new Set<string>()
+    const stack = [modal.branchTipSha]
+    while (stack.length > 0 && seen.size < 5000) {
+      const cur = stack.pop()!
+      if (cur === modal.targetSha) return true
+      if (seen.has(cur)) continue
+      seen.add(cur)
+      const row = rowsBySha.get(cur)
+      if (row) stack.push(...row.parents)
+    }
+    return false
+  }, [modal, rowsBySha])
+
   /** how many commits from the tip are selected (the squash segment) */
   const [segLen, setSegLen] = useState<number | null>(null)
+  // a fresh modal must not inherit the previous squash's segment length
+  useEffect(() => {
+    setSegLen(null)
+  }, [modal])
   const selectedCount = squashed.length === 0 ? 0 : (segLen ?? squashed.length)
 
   // effective base: parent of the oldest selected commit (== the clicked
   // target when everything is selected and the walk reached it)
   const oldestSelected = selectedCount > 0 ? squashed[selectedCount - 1] : undefined
   const effectiveBase = oldestSelected?.parents[0] ?? null
+
+  // Esc dismisses (like AppDialog) — the modal previously had no Esc path
+  useEffect(() => {
+    if (!modal) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSquashModal(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [modal, setSquashModal])
 
   if (!modal) return null
   const soft = modal.branch === currentBranch
@@ -62,7 +95,7 @@ export default function SquashModal({
   }
 
   const commit = () => {
-    if (!effectiveBase) return
+    if (!effectiveBase || !targetValid) return
     setSquashModal(null)
     useUiStore.getState().beginOp('Squash')
     void api
@@ -91,7 +124,7 @@ export default function SquashModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" data-testid="squash-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" role="dialog" aria-modal="true" aria-label="Squash commits" data-testid="squash-modal">
       <div className="w-[520px] rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl">
         <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-100">
           <Scissors className="h-4 w-4 text-amber-400" /> Squash <span className="font-mono">{modal.branch}</span>
@@ -120,7 +153,17 @@ export default function SquashModal({
           </div>
         </div>
 
-        {squashed.length > 0 && (
+        {!targetValid && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              {modal.targetSha.slice(0, 7)} is not on {modal.branch}&apos;s first-parent chain (it sits behind a merge) —
+              pick a target on the branch itself, or cherry-pick/rebase instead.
+            </span>
+          </div>
+        )}
+
+        {targetValid && squashed.length > 0 && (
           <ul className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/60">
             {squashed.map((r, i) => (
               <SquashedCommitRow
@@ -134,10 +177,12 @@ export default function SquashModal({
             ))}
           </ul>
         )}
-        <p className="mt-1.5 text-[11px] text-zinc-600">
-          The selection is the run from the tip — unchecking a commit unchecks everything below it; those older commits
-          stay on the branch.
-        </p>
+        {targetValid && (
+          <p className="mt-1.5 text-[11px] text-zinc-600">
+            The selection is the run from the tip — unchecking a commit unchecks everything below it; those older commits
+            stay on the branch.
+          </p>
+        )}
 
         <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-400">
           {soft ? (
@@ -166,7 +211,7 @@ export default function SquashModal({
           </button>
           <button
             className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40"
-            disabled={selectedCount === 0 || !effectiveBase}
+            disabled={selectedCount === 0 || !effectiveBase || !targetValid}
             onClick={commit}
             data-testid="squash-commit"
             data-ghost-preview={modal.branchTipSha}

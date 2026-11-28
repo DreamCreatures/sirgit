@@ -33,7 +33,7 @@ export default function RefsPanel({
   // the loaded window; a branch whose tip row isn't loaded is old by
   // definition, so missing reads as not-recent
   const rowsBySha = useGraphStore((s2) => s2.rowsBySha)
-  const { data } = useRefs(path)
+  const { data, isError: refsError } = useRefs(path)
   const toast = useUiStore((s) => s.toast)
   const qc = useQueryClient()
 
@@ -114,10 +114,24 @@ export default function RefsPanel({
   }
 
   if (!data) {
+    // a failed fetch (moved/deleted repo) must not hang on "loading refs…"
     return (
-      <aside className="relative flex w-64 shrink-0 items-center justify-center border-r border-zinc-800 bg-zinc-900/30 text-xs text-zinc-500">
+      <aside className="relative flex w-64 shrink-0 flex-col items-center justify-center gap-3 border-r border-zinc-800 bg-zinc-900/30 px-3 text-center text-xs">
         <Resizer side="left" currentWidth={width} onResize={setWidth} />
-        loading refs…
+        {refsError ? (
+          <>
+            <p className="text-red-300">Can’t read refs — the repository may be missing or moved.</p>
+            <a
+              href="/"
+              className="rounded-md bg-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-700"
+              data-testid="refs-error-back"
+            >
+              Back to repositories
+            </a>
+          </>
+        ) : (
+          'loading refs…'
+        )}
       </aside>
     )
   }

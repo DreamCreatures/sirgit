@@ -31,12 +31,12 @@ describe('assignLanes (branch chains)', () => {
       ],
       't3',
     )
-    expect(laneCount).toBe(5)
-    expect(lanes.get('t1')).toBe(2)
-    expect(lanes.get('t2')).toBe(2)
-    expect(lanes.get('t3')).toBe(2) // trunk holds the middle slot
-    expect(lanes.get('a1')).toBe(4) // first side branch fans right, double-spaced (+2)
-    expect(lanes.get('b1')).toBe(0) // second fans left (−2)
+    expect(laneCount).toBe(3)
+    expect(lanes.get('t1')).toBe(1)
+    expect(lanes.get('t2')).toBe(1)
+    expect(lanes.get('t3')).toBe(1) // trunk holds the middle slot
+    expect(lanes.get('a1')).toBe(2) // first side branch right (+1)
+    expect(lanes.get('b1')).toBe(0) // second left (−1) — UNIFORM spacing
     expect(lanes.get('b2')).toBe(0)
   })
 
@@ -53,12 +53,12 @@ describe('assignLanes (branch chains)', () => {
       ],
       't1',
     )
-    expect(laneCount).toBe(7)
-    expect(lanes.get('t1')).toBe(3) // middle slot
-    expect(lanes.get('c1')).toBe(5) // +2
-    expect(lanes.get('c2')).toBe(1) // −2
-    expect(lanes.get('c3')).toBe(6) // +3
-    expect(lanes.get('c4')).toBe(0) // −3
+    expect(laneCount).toBe(5)
+    expect(lanes.get('t1')).toBe(2) // middle slot
+    expect(lanes.get('c1')).toBe(3) // +1
+    expect(lanes.get('c2')).toBe(1) // −1
+    expect(lanes.get('c3')).toBe(4) // +2
+    expect(lanes.get('c4')).toBe(0) // −2
   })
 
   it('keeps a single-branch history in one lane', () => {
@@ -91,9 +91,10 @@ describe('assignLanes (branch chains)', () => {
     expect(lanes.get('b2')).toBe(2)
   })
 
-  it('stacks chains beyond the fan to the right instead of widening the band', () => {
-    // 12 side chains: first 10 alternate ±2..±6, the rest stack right of the
-    // fan — merge-heavy repos must not push the trunk off-screen
+  it('alternates side chains around the trunk with uniform spacing', () => {
+    // 12 side chains: alternate +1,−1,+2,−2 … forever — every sibling gap is
+    // exactly one lane (m == n); the view centers the trunk and horizontal
+    // scroll reaches the outer lanes
     const ordered: CommitRow[] = [row('t1')]
     const tips: { sha: string; current: boolean }[] = [{ sha: 't1', current: true }]
     for (let i = 1; i <= 12; i++) {
@@ -101,14 +102,13 @@ describe('assignLanes (branch chains)', () => {
       tips.push({ sha: `c${i}`, current: false })
     }
     const { lanes } = assignLanes(ordered, tips, 't1', 'tree')
-    expect(lanes.get('t1')).toBe(6) // trunk: 5 left-side fan chains + spacing
-    // display order is c12 (newest) → c1: the fan fills c12..c3, then the
-    // overflow stacks right
-    expect(lanes.get('c12')).toBe(8) // fan chain #1 → right +2
-    expect(lanes.get('c11')).toBe(4) // fan chain #2 → left −2
-    expect(lanes.get('c3')).toBe(0) // fan chain #10 → left −6 (outermost)
-    expect(lanes.get('c2')).toBe(13) // beyond fan: fanRight(6)+1 + left(6)
-    expect(lanes.get('c1')).toBe(14) // fanRight(6)+2 + left(6)
+    expect(lanes.get('t1')).toBe(6) // trunk centered: 6 left chains, 6 right
+    // display order is c12 (newest) → c1: chain k gets +⌈k/2⌉ (odd) or −k/2 (even)
+    expect(lanes.get('c12')).toBe(7) // k=1 → +1
+    expect(lanes.get('c11')).toBe(5) // k=2 → −1
+    expect(lanes.get('c3')).toBe(1) // k=10 → −5
+    expect(lanes.get('c2')).toBe(12) // k=11 → +6 (outermost right)
+    expect(lanes.get('c1')).toBe(0) // k=12 → −6 (outermost left)
   })
 
   it('falls back to topology-only lanes without tips', () => {

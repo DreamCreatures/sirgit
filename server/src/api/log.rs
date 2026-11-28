@@ -82,7 +82,19 @@ pub async fn log_delta(
     let st = app.repo_state(&q.path).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let current = st.current_revision();
 
-    if q.from_rev >= current {
+    if q.from_rev > current {
+        // the client holds a revision from BEFORE a server restart (the
+        // revision counter starts over) — "no change" would strand it; force
+        // a full resync
+        return Ok(Json(DeltaResponse {
+            revision: current,
+            changed: true,
+            reset: Some(true),
+            added: None,
+            removed: None,
+        }));
+    }
+    if q.from_rev == current {
         return Ok(Json(DeltaResponse {
             revision: current,
             changed: false,
