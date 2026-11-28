@@ -255,6 +255,10 @@ export default function RefsPanel({
             disabled={refOpBusy}
             onClick={() => useUiStore.getState().select(b.sha, { kind: 'branch', name: b.name })}
             onDoubleClick={() => {
+              // every dblclick jumps the graph to the branch's commit —
+              // including the CURRENT branch (the only way to find a buried
+              // HEAD on an old project); other branches check out on top
+              useUiStore.getState().requestScrollTo(b.sha)
               if (head?.branch !== b.name) onCheckout(b.name)
             }}
             onRename={() => {
@@ -310,6 +314,7 @@ export default function RefsPanel({
               disabled={refOpBusy}
               onClick={() => useUiStore.getState().select(b.sha, { kind: 'remote-branch', name: b.name })}
               onDoubleClick={() => {
+                useUiStore.getState().requestScrollTo(b.sha)
                 if (!hasLocal) {
                   useUiStore.getState().setDialog({
                     kind: 'confirm',
@@ -354,7 +359,10 @@ export default function RefsPanel({
             refKind="tag"
             disabled={refOpBusy}
             onClick={() => useUiStore.getState().select(t.sha, { kind: 'tag', name: t.name })}
-              onDoubleClick={() => onCheckout(t.name)}
+              onDoubleClick={() => {
+                useUiStore.getState().requestScrollTo(t.sha)
+                onCheckout(t.name)
+              }}
             onRename={() => {
               useUiStore.getState().setDialog({
                 kind: 'prompt',
