@@ -127,18 +127,20 @@ function GraphRowInner({
   const chips = refs ?? []
   // Chip order: [tags…][branch, its remote twin, branch, …][orphan remotes].
   // Pushed-tag truth: the server's ls-remote cache (refreshed after every
-  // fetch/push/pull) when it has data; before any network op ran through
-  // sirgit, fall back to the row heuristic — every chip on a row points at
-  // the SAME commit, so a tag riding a row that carries a remote chip is
-  // on the remote. Either way only the pushed form is shown (never both,
-  // unlike branches which keep local + remote visible).
-  const knownRemoteTags = remoteTags != null && remoteTags.length > 0
+  // fetch/push/pull) once it has actually run — the cache reports its remote
+  // even when the remote has NO tags, and an empty list then truthfully
+  // means "nothing pushed". Only before any network op ran through sirgit
+  // (no cached remote) fall back to the row heuristic — every chip on a row
+  // points at the SAME commit, so a tag riding a row that carries a remote
+  // chip is on the remote. Either way only the pushed form is shown (never
+  // both, unlike branches which keep local + remote visible).
+  const cacheFetched = remoteTagRemote != null
   const rowHasRemote = chips.some((rf) => rf.type === 'remote-branch')
-  const tagPushed = (name: string) => (knownRemoteTags ? remoteTags!.includes(name) : rowHasRemote)
+  const tagPushed = (name: string) => (cacheFetched ? remoteTags!.includes(name) : rowHasRemote)
   // the remote a pushed tag's prefix names: the ls-remote cache's remote
   // when it's authoritative, else the remote chip riding the row
   const rowRemoteName = chips.find((rf) => rf.type === 'remote-branch')?.name.split('/')[0]
-  const tagRemoteName = knownRemoteTags ? (remoteTagRemote ?? rowRemoteName) : rowRemoteName
+  const tagRemoteName = cacheFetched ? (remoteTagRemote ?? rowRemoteName) : rowRemoteName
   const tagPrefix = abbrevRemote(tagRemoteName ?? 'origin')
   const tags = chips.filter((rf) => rf.type === 'tag')
   const ordered: typeof chips = []

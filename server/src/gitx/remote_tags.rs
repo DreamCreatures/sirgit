@@ -50,14 +50,18 @@ fn cache_path(gitdir: &Path) -> PathBuf {
 }
 
 /// Cached remote tag names — empty until the first successful ls-remote.
-/// Lines are `<remote>\t<tag>`; a tab-less line is a legacy plain-name entry
-/// (counts as a tag with an unknown remote).
+/// Lines are `<remote>\t<tag>`; a bare `<remote>\t` marker line (empty tag)
+/// means the remote WAS queried and simply has no tags, so the client must
+/// not fall back to the pushed-tag row heuristic. A tab-less line is a
+/// legacy plain-name entry (counts as a tag with an unknown remote).
 pub fn read_cached(gitdir: &Path) -> RemoteTagCache {
     let mut cache = RemoteTagCache::default();
     let Ok(content) = std::fs::read_to_string(cache_path(gitdir)) else { return cache };
     for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+        // strip only a CR — a full trim() would eat the marker line's
+        // meaningful trailing tab
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.trim().is_empty() {
             continue;
         }
         match line.split_once('\t') {
@@ -65,7 +69,9 @@ pub fn read_cached(gitdir: &Path) -> RemoteTagCache {
                 if cache.remote.is_none() {
                     cache.remote = Some(remote.to_string());
                 }
-                cache.tags.push(tag.to_string());
+                if !tag.is_empty() {
+                    cache.tags.push(tag.to_string());
+                }
             }
             None => cache.tags.push(line.to_string()),
         }
@@ -103,7 +109,10 @@ pub async fn refresh(repo: &str, remote: &str) -> RemoteTagCache {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let body: String = names.iter().map(|n| format!("{}\t{}\n", remote, n)).collect();
+    // leading marker line: records the remote even when it has NO tags, so
+    // an empty remote stays distinguishable from a never-fetched cache
+    let body: String =
+        format!("{}\t\n", remote) + &names.iter().map(|n| format!("{}\t{}\n", remote, n)).collect::<String>();
     let tmp = path.with_extension("tmp");
     if std::fs::write(&tmp, body).is_ok() {
         let _ = std::fs::rename(&tmp, &path);
@@ -160,6 +169,20 @@ garbage line without a tab\n\
         let cache = read_cached(&dir);
         assert_eq!(cache.tags, vec!["v0.1.0"]);
         assert_eq!(cache.remote, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_remote_is_marked_fetched() {
+        // a tag-less remote writes just the marker line — read_cached must
+        // still report the remote so the UI knows the ls-remote DID run and
+        // skips the pushed-tag row heuristic
+        let dir = std::env::temp_dir().join(format!("sirgit-rt-empty-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sirgit")).unwrap();
+        std::fs::write(dir.join("sirgit/remote-tags"), "origin\t\n").unwrap();
+        let cache = read_cached(&dir);
+        assert_eq!(cache.remote, Some("origin".into()));
+        assert!(cache.tags.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
