@@ -270,15 +270,25 @@ export default function RepoPage() {
     }
   }
 
-  // move a branch (row button, or a dragged branch chip). A forward move of
-  // a NON-current branch is a pure ref update — immediate, like ungit (the
-  // hover preview is the confirmation). Anything that can lose work (moving
-  // backward, or the checked-out branch whose reset --hard wipes the
-  // worktree) still confirms.
+  // move a branch (row button, or a dragged branch chip). A move that CANNOT
+  // lose anything — forward (the target descends from the tip), or the tip
+  // already covered by another ref (a branch/remote/tag whose line reaches it
+  // keeps every commit alive no matter where the pointer goes) — is a pure
+  // ref update on a NON-current branch: immediate, like ungit (the hover
+  // preview is the confirmation). Anything that can lose work still confirms
+  // — and the dialog now states what is ACTUALLY at risk (the branch's own
+  // unique commits), not a blanket "everything becomes unreachable": the
+  // target node's other branches are never touched by the move.
   const moveBranchTo = (branch: string, targetSha: string) => {
     const isCurrent = currentBranch === branch
     const tip = refs?.branches.find((b) => b.name === branch)?.sha
     const forward = !!tip && isAncestorOf(tip, targetSha)
+    const covered =
+      !!tip &&
+      [...(refs?.branches ?? []), ...(refs?.remoteBranches ?? []), ...(refs?.tags ?? [])].some(
+        (r) => r.name !== branch && isAncestorOf(tip, r.sha),
+      )
+    const losesCommits = !forward && !covered
     const run = () => {
       useUiStore.getState().beginOp('Move')
       void api
@@ -295,7 +305,7 @@ export default function RepoPage() {
         })
         .finally(() => useUiStore.getState().endOp())
     }
-    if (forward && !isCurrent) {
+    if (!losesCommits && !isCurrent) {
       run()
       return
     }
@@ -304,7 +314,9 @@ export default function RepoPage() {
       danger: true,
       title: `Move branch "${branch}"`,
       message:
-        `"${branch}" will point at ${targetSha.slice(0, 7)} — commits unique to it become unreachable (recoverable via reflog).` +
+        (losesCommits
+          ? `"${branch}" will point at ${targetSha.slice(0, 7)} — commits unique to it become unreachable (recoverable via reflog). The node you picked keeps its other branches; only "${branch}"'s own commits are affected.`
+          : `"${branch}" will point at ${targetSha.slice(0, 7)} — nothing becomes unreachable: ${covered ? 'another branch already reaches every commit it holds' : 'the target descends from its current tip'}.`) +
         (isCurrent ? '\n\nIt is the checked-out branch: this runs reset --hard and discards uncommitted changes.' : ''),
       confirmLabel: 'Move',
       onConfirm: run,
