@@ -11,6 +11,14 @@ body,
   height: 100%;
 }
 
+/* Two-finger horizontal swipes must not become browser back/forward: the
+ * graph scrolls horizontally and a gesture at its edge otherwise chains
+ * into history navigation — mac trackpads hit this constantly. */
+html,
+body {
+  overscroll-behavior-x: none;
+}
+
 body {
   @apply bg-zinc-950 text-zinc-300 antialiased;
 }

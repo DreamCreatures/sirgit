@@ -2,7 +2,7 @@ import { memo, useState, type DragEvent, type ReactNode } from 'react'
 import { GitBranch, Tag } from 'lucide-react'
 import type { CommitRow, RefInfo } from '../../lib/types'
 import { relTime } from '../../lib/time'
-import { abbrevRemote, abbrevRemoteRef } from '../../lib/remoteLabel'
+import { abbrevRemote } from '../../lib/remoteLabel'
 import { containsCommit } from '../../lib/dag'
 import { useUiStore } from '../../state/uiStore'
 import { ROW_H, laneX } from './GraphView'
@@ -25,7 +25,7 @@ interface GraphRowProps {
   /** the remote the remoteTags cache came from (raw name — the pushed-tag prefix) */
   remoteTagRemote?: string | null
   isHead: boolean
-  /** the checked-out branch — the only chip allowed to say (HEAD) */
+  /** the checked-out branch — its chip is the one that turns red */
   currentBranch?: string
   selected: boolean
   /** the ref the user picked (branch/tag chip) — highlights that chip */
@@ -374,32 +374,46 @@ function GraphRowInner({
         }
       >
       {/* branch/remote chips, one line: [branch + its remote twin][orphan
-       * remotes] — tags sit on the node's other side now. Remote names
-       * abbreviate to 3 letters in LABELS ONLY (origin/main → ori/main) —
-       * selection, drags and git refspecs all keep the full name via refName. */}
+       * remotes] — tags sit on the node's other side now. Ref type reads
+       * through COLOR, not name prefixes: the checked-out branch is red,
+       * local branches green, remote-tracking branches blue with the bare
+       * branch name as label (the tooltip keeps the full origin/x ref), tags
+       * amber. Selection, drags and git refspecs all keep the full name via
+       * refName. */}
       <div className={`flex shrink-0 items-center gap-1${actionsRevealed ? ' hidden' : ''}`} data-testid="row-chips">
-        {shownBranches.map((rf) =>
-          rf.type === 'branch' ? (
+        {shownBranches.map((rf) => {
+          if (rf.type === 'branch') {
+            const current = isHead && rf.name === currentBranch
+            return (
+              <Chip
+                key={rf.name}
+                icon={<GitBranch className="h-3 w-3" />}
+                label={rf.name}
+                title={`${rf.name}${current ? ' — current branch (HEAD)' : ''} — drag onto a commit to move`}
+                className={
+                  (current
+                    ? 'bg-red-400/10 text-red-300 border-red-400/30 font-medium'
+                    : 'bg-emerald-400/10 text-emerald-300 border-emerald-400/30 font-medium') +
+                  (selectedRef?.kind === 'branch' && selectedRef.name === rf.name
+                    ? current
+                      ? ' ring-1 ring-red-400/70'
+                      : ' ring-1 ring-emerald-400/70'
+                    : '')
+                }
+                onSelect={onSelect}
+                sha={row.sha}
+                refKind="branch"
+                refName={rf.name}
+                dragRef={onMoveBranch ? { kind: 'branch', name: rf.name } : undefined}
+                onCheckout={onCheckout && rf.name !== currentBranch ? () => onCheckout(rf.name) : undefined}
+              />
+            )
+          }
+          return (
             <Chip
               key={rf.name}
               icon={<GitBranch className="h-3 w-3" />}
-              label={rf.name + (isHead && rf.name === currentBranch ? ' (HEAD)' : '')}
-              className={
-                'bg-emerald-400/10 text-emerald-300 border-emerald-400/30 font-medium' +
-                (selectedRef?.kind === 'branch' && selectedRef.name === rf.name ? ' ring-1 ring-emerald-400/70' : '')
-              }
-              onSelect={onSelect}
-              sha={row.sha}
-              refKind="branch"
-              refName={rf.name}
-              dragRef={onMoveBranch ? { kind: 'branch', name: rf.name } : undefined}
-              onCheckout={onCheckout && rf.name !== currentBranch ? () => onCheckout(rf.name) : undefined}
-            />
-          ) : (
-            <Chip
-              key={rf.name}
-              icon={<GitBranch className="h-3 w-3" />}
-              label={abbrevRemoteRef(rf.name)}
+              label={rf.name.slice(rf.name.indexOf('/') + 1)}
               title={`${rf.name} — double-click to check out`}
               className={
                 'bg-sky-400/10 text-sky-300/80 border-sky-400/20' +
@@ -411,8 +425,8 @@ function GraphRowInner({
               refName={rf.name}
               onCheckout={onCheckout ? () => onCheckout(rf.name) : undefined}
             />
-          ),
-        )}
+          )
+        })}
         {overflow > 0 && (
           <button
             className="cursor-pointer rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
@@ -585,7 +599,8 @@ function Chip({
   sha: string
   /** this chip's ref identity — clicking selects the ref, not just the commit */
   refKind: 'branch' | 'tag' | 'remote-branch'
-  /** raw ref name (label may carry the (HEAD) suffix or the abbreviated remote) */
+  /** raw ref name (the label is a color-coded rendering — remote prefixes are
+   *  display-only; every action goes through this full name) */
   refName: string
   /** set → the chip is draggable onto another row to move that branch/tag */
   dragRef?: { kind: 'branch' | 'tag'; name: string }

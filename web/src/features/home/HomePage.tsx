@@ -294,7 +294,6 @@ export default function HomePage() {
             onKeyDown={onPathKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            autoFocus
             data-testid="path-input"
           />
           <button

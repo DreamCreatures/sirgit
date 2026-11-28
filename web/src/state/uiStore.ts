@@ -279,7 +279,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   stashOpen: true,
   toggleStash: () => set((s) => ({ stashOpen: !s.stashOpen })),
 
-  subjectCompact: localStorage.getItem('sirgit.subjectCompact') === '1',
+  // titles hidden by default — first visit opens in compact mode (the owner
+  // runs this way; stored '0' keeps titles visible for those who opt in)
+  subjectCompact: localStorage.getItem('sirgit.subjectCompact') !== '0',
   setSubjectCompact: (v) => {
     localStorage.setItem('sirgit.subjectCompact', v ? '1' : '0')
     set({ subjectCompact: v })

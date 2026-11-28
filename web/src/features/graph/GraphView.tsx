@@ -36,7 +36,7 @@ interface GraphViewProps {
   nextCommit?: boolean
   /** hover preview: anchor the dashed node above this commit (the action's target) */
   ghostTarget?: string | null
-  /** checked-out branch name — marks the one chip that says (HEAD) */
+  /** checked-out branch name — marks the one chip that turns red */
   currentBranch?: string
   /** the ref the user picked (highlights its chip; drives merge buttons upstream) */
   selectedRef?: SelectedRef | null
@@ -286,7 +286,7 @@ export default function GraphView({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="scroll-thin relative h-full overflow-auto"
+      className="scroll-thin relative h-full overflow-auto overscroll-none"
       data-testid="graph-scroll"
     >
       <div style={{ height: contentH, width: contentW, position: 'relative' }}>

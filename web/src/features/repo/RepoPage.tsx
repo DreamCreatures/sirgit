@@ -345,23 +345,30 @@ export default function RepoPage() {
       },
     })
   }
-  // moving a REMOTE branch (origin/x) = pushing <sha>:<branch> to that remote
+  // moving a REMOTE branch (origin/x) = pushing <sha>:<branch> to that
+  // remote. Forward moves (the remote tip is an ancestor of the target) are
+  // a plain push. Backward moves REWRITE published history — git rejects
+  // them as non-fast-forward — so they go out as --force-with-lease after
+  // the dialog says exactly what is lost.
   const moveRemoteRefTo = (remoteRef: string, targetSha: string) => {
     const slash = remoteRef.indexOf('/')
     const remote = remoteRef.slice(0, slash)
     const branch = remoteRef.slice(slash + 1)
+    const tip = refs?.remoteBranches.find((r) => r.name === remoteRef)?.sha
+    const forward = !!tip && isAncestorOf(tip, targetSha)
     useUiStore.getState().setDialog({
       kind: 'confirm',
+      danger: !forward,
       title: `Move ${remoteRef} to ${targetSha.slice(0, 7)}`,
-      message:
-        `Pushes ${targetSha.slice(0, 7)} to "${branch}" on ${remote} — git push ${remote} <sha>:${branch}.\n\n` +
-        'The remote rejects non-fast-forward updates, so nothing already published can be lost this way; fetch first if the branch moved.',
-      confirmLabel: 'Push',
+      message: forward
+        ? `Pushes ${targetSha.slice(0, 7)} to "${branch}" on ${remote} — git push ${remote} <sha>:${branch}.`
+        : `Pushes ${targetSha.slice(0, 7)} to "${branch}" on ${remote} — the remote branch moves BACKWARD, so this is a FORCE push (--force-with-lease). Commits after it drop off the branch; clones that already have them keep them, and the remote's reflog may still hold them.`,
+      confirmLabel: forward ? 'Push' : 'Force-push',
       // returns the netOp promise → the dialog stays up with a spinner until
       // the push completes (netOp never rejects; it toasts errors itself)
       onConfirm: () =>
         netOp(
-          () => api.push(path, remote, `${targetSha}:refs/heads/${branch}`),
+          () => api.push(path, remote, `${targetSha}:refs/heads/${branch}`, !forward),
           `${remoteRef} moved to ${targetSha.slice(0, 7)}`,
         ),
     })
@@ -749,9 +756,17 @@ export default function RepoPage() {
             busy={!!netBusy}
             disabled={!!netBusy}
             onClick={() => {
-              void qc.invalidateQueries({ queryKey: ['refs', path] })
-              void qc.invalidateQueries({ queryKey: ['status', path] })
-              void applyDelta()
+              // Refresh is a real fetch: fetch --all --prune pulls new
+              // commits for every remote and DROPS remote-tracking branches
+              // deleted upstream (merged + removed on the remote). Repos
+              // with no remote fall back to a plain local re-read.
+              if ((refs?.remotes.length ?? 0) === 0) {
+                void qc.invalidateQueries({ queryKey: ['refs', path] })
+                void qc.invalidateQueries({ queryKey: ['status', path] })
+                void applyDelta()
+                return
+              }
+              void netOp(() => api.fetch(path), 'Refresh complete')
             }}
           />
           <HeaderButton
