@@ -1,6 +1,6 @@
 {
   "name": "dcs-sirgit",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A fast, visual git client — built as a thank-you to ungit. One Rust binary, zero runtime dependencies.",
   "keywords": [
     "git",
