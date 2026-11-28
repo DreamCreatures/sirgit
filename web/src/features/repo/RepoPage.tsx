@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, GitBranch, RefreshCw, CloudDownload, Download, Loader2, Eye, EyeOff, ListTree, AlignStartVertical } from 'lucide-react'
-import { api, pollOp } from '../../lib/client'
+import { api, pollOp, GitRequestError } from '../../lib/client'
 import { useRefs, useStatus, useConfig } from '../../api/hooks'
 import { useRepoEvents } from '../../lib/ws'
 import { useGraphStore } from '../../state/graphStore'
@@ -765,20 +765,38 @@ export default function RepoPage() {
           <HeaderButton
             icon={<RefreshCw className="h-3.5 w-3.5" />}
             label="Refresh"
+            title="Fetch every remote (prunes branches deleted upstream) + pull the current branch (fast-forward)"
             busy={!!netBusy}
             disabled={!!netBusy}
             onClick={() => {
-              // Refresh is a real fetch: fetch --all --prune pulls new
-              // commits for every remote and DROPS remote-tracking branches
-              // deleted upstream (merged + removed on the remote). Repos
-              // with no remote fall back to a plain local re-read.
+              // Refresh = Fetch + Pull: fetch --all --prune first (new
+              // commits for every remote, branches deleted upstream dropped),
+              // then a real pull of the current branch. A divergence is not
+              // an error here — the user may be mid-work on purpose; the info
+              // toast points at Pull instead of failing the whole refresh.
               if ((refs?.remotes.length ?? 0) === 0) {
                 void qc.invalidateQueries({ queryKey: ['refs', path] })
                 void qc.invalidateQueries({ queryKey: ['status', path] })
                 void applyDelta()
                 return
               }
-              void netOp(() => api.fetch(path), 'Refresh complete')
+              void netOp(async () => {
+                const { opId } = await api.fetch(path)
+                await pollOp(opId)
+                const upstream = pullBranch
+                  ? refs?.branches.find((b) => b.name === pullBranch)?.upstream
+                  : undefined
+                if (pullBranch && upstream) {
+                  try {
+                    await pollOp((await api.pull(path, pullBranch)).opId)
+                  } catch (e) {
+                    if (e instanceof GitRequestError && e.code === 'not-fast-forward') {
+                      toast({ kind: 'info', title: `${pullBranch} diverged from ${upstream} — Pull to reconcile` })
+                    } else throw e
+                  }
+                }
+                return { opId }
+              }, 'Refresh complete')
             }}
           />
           <HeaderButton
